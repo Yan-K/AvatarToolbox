@@ -56,6 +56,17 @@ Control avatar, camera, lighting, and post-processing from a dedicated editor wi
 - **Post Processing** — Volume auto-attached to the active camera; browsable profile list with add / clone / remove
 - **Undo Support** — All operations are fully undoable
 
+### Yan-K Smart Package (YSP)
+
+Dependency-aware `.unitypackage` exporter and importer in one tabbed window.
+
+- **Dependency-Aware Export** — Tri-state asset tree built from `AssetDatabase` dependencies, with missing-reference detection
+- **Filters & Exclusions** — Search, sort, type filter, exclude by extension or .NET Regex name patterns
+- **Folder Collection Modes** — KeepStructure / AutoOrganize / SingleFolder / Custom, in either Non-Destructive (path remap on export) or Destructive (project move + restore manifest) mode
+- **Custom Bucket Overrides** — Per-folder or per-asset bucket assignment with inheritance, batch tools, and persistent overrides
+- **Multi-File Importer** — Drag-and-drop multiple `.unitypackage` files, preview entries, partial import with original GUIDs preserved
+- **Conflict Detection** — Per-entry New / Update / Path conflict / GUID conflict status with Overwrite / Skip / Ask policy
+
 ### Shared
 
 - **Localization** — English, 简体中文, 繁體中文, 日本語, 한국어
@@ -117,6 +128,10 @@ YME Bug fix: Material merge internally while list card is not.
 ### v1.3.1 - 2026/05/04
 
 YSC Bug fix: Fix default free fly camera settings.
+
+### v1.4.0 - 2026/05/21
+
+Added **Yan-K Smart Package (YSP)**.
 
 ## Credit
 
