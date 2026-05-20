@@ -133,6 +133,10 @@ YSC Bug fix: Fix default free fly camera settings.
 
 Added **Yan-K Smart Package (YSP)**.
 
+### v1.4.1 - 2026/05/21
+
+YSP Change: Default export package name fixed.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

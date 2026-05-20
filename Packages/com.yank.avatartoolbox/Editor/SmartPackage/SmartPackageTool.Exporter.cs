@@ -748,9 +748,12 @@ namespace YanK
 			}
 
 			string startFolder = EditorPrefs.GetString(Prefs.LastExportFolder, Application.dataPath);
+			string defaultName = settings.TopMode == FolderCollectionTopMode.None
+				? "YSP_Export_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss")
+				: folderCollectionRootName;
 			string outPath = EditorUtility.SaveFilePanel(
 				L("yspExportPanelTitle", "Export Smart Package"),
-				startFolder, "MyPackage", "unitypackage");
+				startFolder, defaultName, "unitypackage");
 			if (string.IsNullOrEmpty(outPath))
 				return;
 
