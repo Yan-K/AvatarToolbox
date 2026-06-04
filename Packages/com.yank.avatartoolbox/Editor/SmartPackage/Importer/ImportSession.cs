@@ -7,10 +7,12 @@ namespace YanK
 {
 	public static class ImportSession
 	{
-		public static void Apply(IEnumerable<LoadedPackage> packages, ConflictPolicy policy)
+		// Returns true when the import ran to completion (even if some entries were
+		// skipped or failed); returns false only when the user cancelled.
+		public static bool Apply(IEnumerable<LoadedPackage> packages, ConflictPolicy policy)
 		{
 			if (packages == null)
-				return;
+				return false;
 
 			List<(LoadedPackage pkg, UnityPackageEntry entry)> queue = new List<(LoadedPackage, UnityPackageEntry)>();
 
@@ -36,7 +38,37 @@ namespace YanK
 			if (queue.Count == 0)
 			{
 				EditorUtility.DisplayDialog("Smart Package Import", "Nothing selected.", "OK");
-				return;
+				return true;
+			}
+
+			// Load the heavy asset/meta payloads only for the selected entries, one
+			// re-read per package, so dropping 100+ packages never bloats memory.
+			Dictionary<LoadedPackage, Dictionary<string, LoadedAssetBytes>> bytesByPackage =
+				new Dictionary<LoadedPackage, Dictionary<string, LoadedAssetBytes>>();
+			{
+				Dictionary<LoadedPackage, HashSet<string>> guidsByPackage = new Dictionary<LoadedPackage, HashSet<string>>();
+				foreach (var (pkg, entry) in queue)
+				{
+					if (!guidsByPackage.TryGetValue(pkg, out HashSet<string> set))
+					{
+						set = new HashSet<string>();
+						guidsByPackage[pkg] = set;
+					}
+					set.Add(entry.Guid);
+				}
+
+				try
+				{
+					foreach (var kv in guidsByPackage)
+						bytesByPackage[kv.Key] = UnityPackageReader.ReadBytesFor(kv.Key.FilePath, kv.Value);
+				}
+				catch (System.Exception ex)
+				{
+					Debug.LogError("[YSP] Failed to read package payload: " + ex);
+					EditorUtility.DisplayDialog("Smart Package Import",
+						"Failed to read package payload:\n" + ex.Message, "OK");
+					return true;
+				}
 			}
 
 			string projectRoot = Directory.GetParent(Application.dataPath).FullName;
@@ -106,6 +138,15 @@ namespace YanK
 						continue;
 					}
 
+					byte[] assetBytes = null;
+					byte[] metaBytes = null;
+					if (bytesByPackage.TryGetValue(pkg, out Dictionary<string, LoadedAssetBytes> pkgBytes)
+						&& pkgBytes.TryGetValue(entry.Guid, out LoadedAssetBytes payload))
+					{
+						assetBytes = payload.AssetBytes;
+						metaBytes = payload.MetaBytes;
+					}
+
 					string absPath = Path.Combine(projectRoot, entry.AssetPath.Replace('/', Path.DirectorySeparatorChar));
 					string absMeta = absPath + ".meta";
 
@@ -113,13 +154,13 @@ namespace YanK
 					if (!string.IsNullOrEmpty(parent))
 						Directory.CreateDirectory(parent);
 
-					if (entry.AssetBytes != null)
-						File.WriteAllBytes(absPath, entry.AssetBytes);
+					if (assetBytes != null)
+						File.WriteAllBytes(absPath, assetBytes);
 					else if (!Directory.Exists(absPath))
 						Directory.CreateDirectory(absPath);
 
-					if (entry.MetaBytes != null)
-						File.WriteAllBytes(absMeta, entry.MetaBytes);
+					if (metaBytes != null)
+						File.WriteAllBytes(absMeta, metaBytes);
 
 					written++;
 				}
@@ -139,6 +180,8 @@ namespace YanK
 			string summary = string.Format("Written: {0}\nSkipped: {1}\nFailed: {2}{3}",
 				written, skipped, failed, cancelled ? "\n(Cancelled)" : "");
 			EditorUtility.DisplayDialog("Smart Package Import", summary, "OK");
+
+			return !cancelled;
 		}
 
 		private static string GetExisting(LoadedPackage pkg, UnityPackageEntry entry)

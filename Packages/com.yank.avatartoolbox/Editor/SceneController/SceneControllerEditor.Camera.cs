@@ -28,15 +28,25 @@ namespace YanK
 			var mode = sc.GetEffectiveCameraMode();
 			bool isFreeFly = mode == CameraControlMode.FreeFly;
 			bool isOrbit = mode == CameraControlMode.Orbit;
+			bool isOff = mode == CameraControlMode.Off;
 
-			// ---- Control mode (2-button toggle) ----
+			// ---- Control mode (3-button toggle: Orbit / Free Fly / Off) ----
 			EditorGUILayout.BeginHorizontal();
 			EditorGUILayout.LabelField(YanKLocalization.L("scCamMode", "Control Mode"), GUILayout.Width(EditorGUIUtility.labelWidth));
+			int currentIdx = sc.cameraMode == CameraControlMode.Orbit ? 0
+				: sc.cameraMode == CameraControlMode.FreeFly ? 1 : 2;
 			int modeIdx = GUILayout.Toolbar(
-				sc.cameraMode == CameraControlMode.Orbit ? 0 : 1,
-				new[] { YanKLocalization.L("scOrbit", "Orbit"), YanKLocalization.L("scFreeFly", "Free Fly") });
+				currentIdx,
+				new[]
+				{
+					YanKLocalization.L("scOrbit", "Orbit"),
+					YanKLocalization.L("scFreeFly", "Free Fly"),
+					YanKLocalization.L("scCamOff", "Off")
+				});
 			EditorGUILayout.EndHorizontal();
-			var newMode = modeIdx == 0 ? CameraControlMode.Orbit : CameraControlMode.FreeFly;
+			var newMode = modeIdx == 0 ? CameraControlMode.Orbit
+				: modeIdx == 1 ? CameraControlMode.FreeFly
+				: CameraControlMode.Off;
 			if (newMode != sc.cameraMode)
 			{
 				Undo.RecordObject(sc, "Change Camera Mode");
@@ -52,6 +62,37 @@ namespace YanK
 					SyncFovFromActiveCustomCamera(sc.activeCustomCameraName);
 					ApplyActiveCamera();
 				}
+				// Off: leave activeCustomCameraName as-is so the user can return to it later.
+			}
+
+			// ---- External controller block ----
+			EditorGUILayout.BeginHorizontal();
+			EditorGUILayout.LabelField(
+				YanKLocalization.L("scExtCamMode", "External Controllers"),
+				GUILayout.Width(EditorGUIUtility.labelWidth));
+			int extIdx = sc.externalCameraControl == ExternalCameraControlMode.Allow ? 0 : 1;
+			int newExtIdx = GUILayout.Toolbar(
+				extIdx,
+				new[]
+				{
+					YanKLocalization.L("scExtCamAllow", "Allow"),
+					YanKLocalization.L("scExtCamBlock", "Block")
+				});
+			EditorGUILayout.EndHorizontal();
+			var newExt = newExtIdx == 0 ? ExternalCameraControlMode.Allow : ExternalCameraControlMode.Block;
+			if (newExt != sc.externalCameraControl)
+			{
+				Undo.RecordObject(sc, "Change External Camera Control");
+				sc.externalCameraControl = newExt;
+			}
+
+			if (isOff)
+			{
+				EditorGUILayout.HelpBox(
+					YanKLocalization.L("scCamOffHint",
+						"Off: SceneController will not read input or write the camera transform.\nUse this when you want another tool to fully control the camera."),
+					MessageType.Info);
+				return;
 			}
 
 			GUILayout.Space(8);

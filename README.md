@@ -137,6 +137,11 @@ Added **Yan-K Smart Package (YSP)**.
 
 YSP Change: Default export package name fixed.
 
+### v1.5.0 - 2026/06/05
+
+YSC Change: Added external camera script blocker.
+YSP Change: Better conflict display, UI QoL update, Multi-thread import.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

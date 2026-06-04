@@ -8,6 +8,10 @@ namespace YanK
 		public byte[] MetaBytes;
 		public byte[] PreviewBytes;
 
+		// Uncompressed asset payload size in bytes, captured during a metadata-only
+		// scan when AssetBytes is not loaded into memory.
+		public long Size;
+
 		public long TotalSize
 		{
 			get

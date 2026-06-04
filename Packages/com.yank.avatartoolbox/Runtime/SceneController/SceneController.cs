@@ -61,7 +61,19 @@ namespace YanK
 		/// <summary>RMB orbits around the inspected bone; WASD pans the pivot.</summary>
 		Orbit,
 		/// <summary>RMB aims, WASD flies the camera in 6DOF (no pivot orbit).</summary>
-		FreeFly
+		FreeFly,
+		/// <summary>SceneController does NOT read input or write camera transforms.
+		/// Use this for compatibility with external camera controllers.</summary>
+		Off
+	}
+
+	/// <summary>Whether to interfere with externally-injected camera controllers.</summary>
+	public enum ExternalCameraControlMode
+	{
+		/// <summary>Leave any third-party camera controllers alone.</summary>
+		Allow,
+		/// <summary>Strip and disable third-party camera controllers on our managed cameras each tick.</summary>
+		Block
 	}
 
 	[Serializable]
@@ -166,6 +178,9 @@ namespace YanK
 		public float moveSpeed = 1f;
 		public float verticalSpeed = 1f;
 		public bool invertMouseY;
+
+		// When set to Block, strip third-party camera controller injections each tick so our control isn't fought over.
+		public ExternalCameraControlMode externalCameraControl = ExternalCameraControlMode.Allow;
 
 		// ----- Directional light -----
 		public bool dirLightEnabled;
@@ -293,6 +308,7 @@ namespace YanK
 		private void Update()
 		{
 			if (!Application.isPlaying) return;
+			if (externalCameraControl == ExternalCameraControlMode.Block) SceneControllerExternalBlocker.Tick(this);
 			SceneControllerInput.HandleInput(this, Time.deltaTime);
 			ApplyAvatarMovement(Time.deltaTime);
 			UpdatePointLightsRotation(Time.deltaTime);
@@ -334,6 +350,7 @@ namespace YanK
 
 		private void Tick(float dt)
 		{
+			if (externalCameraControl == ExternalCameraControlMode.Block) SceneControllerExternalBlocker.Tick(this);
 			ApplyAvatarMovement(dt);
 			UpdateCameraRig();
 			UpdatePointLightsRotation(dt);
@@ -411,8 +428,11 @@ namespace YanK
 			cameraPivot.position = avatarRoot.transform.position + cameraPivotOffset;
 			cameraPivot.rotation = Quaternion.identity;
 
-			bool isCustomActive = !string.IsNullOrEmpty(activeCustomCameraName);
 			var mode = GetEffectiveCameraMode();
+			// Off mode hands camera control to whatever external script is driving things.
+			if (mode == CameraControlMode.Off) return;
+
+			bool isCustomActive = !string.IsNullOrEmpty(activeCustomCameraName);
 
 			// Only the Default camera in Orbit mode is driven from sliders.
 			// Free-Fly mode never rewrites the transform so WASD / mouse input sticks.
@@ -444,9 +464,10 @@ namespace YanK
 			}
 		}
 
-		/// <summary>Effective input mode. Custom cameras are always Free-Fly.</summary>
+		/// <summary>Effective input mode. Custom cameras are always Free-Fly, except when explicitly Off.</summary>
 		public CameraControlMode GetEffectiveCameraMode()
 		{
+			if (cameraMode == CameraControlMode.Off) return CameraControlMode.Off;
 			return string.IsNullOrEmpty(activeCustomCameraName) ? cameraMode : CameraControlMode.FreeFly;
 		}
 

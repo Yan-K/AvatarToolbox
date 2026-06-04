@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 
@@ -16,6 +17,36 @@ namespace YanK
 		public bool IsExpanded = true;
 		public long FileSize;
 		public string Extension;
+
+		// Importer-only aggregate flags: true when this node (or, for folders, any
+		// checked descendant) currently has a checked GUID / path conflict. Updated
+		// by the importer when the checked state changes.
+		public bool HasCheckedGuidConflict;
+		public bool HasCheckedPathConflict;
+
+		// True when this node (or any checked descendant, for folders) is an Update:
+		// the incoming asset overwrites an existing asset at the same path/GUID.
+		public bool HasCheckedUpdate;
+
+		// Sorts children (folders first, then by name, case-insensitive) recursively.
+		// Called once after the tree is built so per-frame drawing never re-sorts.
+		public void SortChildrenRecursive()
+		{
+			if (Children.Count > 1)
+			{
+				Children.Sort((a, b) =>
+				{
+					int fc = (b.IsFolder ? 1 : 0) - (a.IsFolder ? 1 : 0);
+					if (fc != 0) return fc;
+					return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+				});
+			}
+			for (int i = 0; i < Children.Count; i++)
+			{
+				if (Children[i].IsFolder)
+					Children[i].SortChildrenRecursive();
+			}
+		}
 
 		public ToggleState GetState()
 		{

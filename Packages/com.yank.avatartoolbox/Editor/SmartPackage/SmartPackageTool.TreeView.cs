@@ -45,6 +45,13 @@ namespace YanK
 		private Rect DrawRowCore(PackageAssetNode node, int depth, float tailWidth)
 		{
 			Rect row = GUILayoutUtility.GetRect(0, RowHeight, GUILayout.Height(RowHeight), GUILayout.ExpandWidth(true));
+			bool importer = currentTab == SmartPackageTab.Importer;
+
+			// Whole-row highlight (importer only) so the user can trace a row across
+			// its left checkbox and right-side conflict badge.
+			if (importer && node == importerHighlightNode && Event.current.type == EventType.Repaint)
+				EditorGUI.DrawRect(row, new Color(0.24f, 0.48f, 0.90f, 0.20f));
+
 			float midY = row.y + (RowHeight - 16f) * 0.5f;
 			float x = row.x + depth * TreeIndentWidth;
 
@@ -68,7 +75,7 @@ namespace YanK
 			{
 				node.SetChecked(nv, true);
 				node.Parent?.RecomputeFromChildren();
-				MarkSelectionDirty();
+				OnRowCheckChanged();
 			}
 			x += TreeToggleWidth + 2f;
 
@@ -86,8 +93,29 @@ namespace YanK
 			Rect nameR = new Rect(x, row.y, nameRight - x, RowHeight);
 			GUI.Label(nameR, node.Name, RowNameStyle);
 
+			// Click the name area to highlight the whole row (importer only).
+			if (importer && Event.current.type == EventType.MouseDown && Event.current.button == 0
+				&& nameR.Contains(Event.current.mousePosition))
+			{
+				importerHighlightNode = node;
+				Repaint();
+				Event.current.Use();
+			}
+
 			return new Rect(nameRight, row.y, tailWidth, RowHeight);
 		}
+
+		// Called when a row checkbox changes. Keeps the exporter preview behaviour
+		// but only invalidates importer tallies via a version bump while in the
+		// importer tab (avoids needless exporter preview rebuilds during import).
+		private void OnRowCheckChanged()
+		{
+			if (currentTab == SmartPackageTab.Importer)
+				importerCheckVersion++;
+			else
+				MarkSelectionDirty();
+		}
+
 
 		private static Texture GetCachedIconFor(PackageAssetNode node)
 		{
@@ -179,33 +207,41 @@ namespace YanK
 			return (bytes / (1024f * 1024f * 1024f)).ToString("0.0") + " GB";
 		}
 
-		// Importer variant: no exporter filters; draws conflict badge per leaf.
+		// Importer variant: no exporter filters; draws conflict badge per leaf (only
+		// when checked) and an aggregate badge on folders containing checked conflicts.
 		private void DrawNode(PackageAssetNode node, int depth, Dictionary<string, ImportConflict> conflictByPath)
 		{
 			if (node == null) return;
 
-			ImportConflict conflict = default;
-			bool hasConflict = !node.IsFolder && conflictByPath != null && conflictByPath.TryGetValue(node.FullPath, out conflict);
-			float badgeW = hasConflict ? GetBadgeWidth(conflict.Kind) : 0f;
+			ImportConflictKind badgeKind = default;
+			bool hasBadge = false;
+			if (node.IsFolder)
+			{
+				if (node.HasCheckedGuidConflict) { badgeKind = ImportConflictKind.GuidConflict; hasBadge = true; }
+				else if (node.HasCheckedPathConflict) { badgeKind = ImportConflictKind.PathConflict; hasBadge = true; }
+				else if (node.HasCheckedUpdate) { badgeKind = ImportConflictKind.Update; hasBadge = true; }
+			}
+			else if (node.IsChecked && conflictByPath != null && conflictByPath.TryGetValue(node.FullPath, out ImportConflict c))
+			{
+				badgeKind = c.Kind;
+				hasBadge = true;
+			}
+
+			float badgeW = hasBadge ? GetBadgeWidth(badgeKind) : 0f;
 
 			Rect tail = DrawRowCore(node, depth, badgeW);
-			if (hasConflict)
+			if (hasBadge)
 			{
 				Rect badgeR = new Rect(tail.x, tail.y + (RowHeight - 16f) * 0.5f, badgeW, 16f);
-				DrawConflictBadge(badgeR, conflict.Kind);
+				DrawConflictBadge(badgeR, badgeKind);
 			}
 
 			if (node.IsFolder && node.IsExpanded)
 			{
-				List<PackageAssetNode> kids = new List<PackageAssetNode>(node.Children);
-				kids.Sort((a, b) =>
-				{
-					int fc = (b.IsFolder ? 1 : 0) - (a.IsFolder ? 1 : 0);
-					if (fc != 0) return fc;
-					return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
-				});
-				foreach (PackageAssetNode c in kids)
-					DrawNode(c, depth + 1, conflictByPath);
+				// Children were sorted once at load time; iterate directly.
+				List<PackageAssetNode> kids = node.Children;
+				for (int i = 0; i < kids.Count; i++)
+					DrawNode(kids[i], depth + 1, conflictByPath);
 			}
 		}
 
@@ -221,7 +257,7 @@ namespace YanK
 			switch (kind)
 			{
 				case ImportConflictKind.New: return L("yspConflictNew", "New");
-				case ImportConflictKind.Update: return L("yspConflictUpdate", "Update");
+				case ImportConflictKind.Update: return L("yspConflictUpdate", "Existed");
 				case ImportConflictKind.PathConflict: return L("yspConflictPath", "Path conflict");
 				case ImportConflictKind.GuidConflict: return L("yspConflictGuid", "GUID conflict");
 				default: return kind.ToString();
