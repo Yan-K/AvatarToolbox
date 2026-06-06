@@ -142,6 +142,10 @@ YSP Change: Default export package name fixed.
 YSC Change: Added external camera script blocker.
 YSP Change: Better conflict display, UI QoL update, Multi-thread import.
 
+### v1.5.1 - 2026/06/07
+
+YSC Change: Fixed import count error.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

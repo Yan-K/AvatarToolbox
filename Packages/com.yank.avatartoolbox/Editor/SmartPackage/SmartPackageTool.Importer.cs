@@ -242,6 +242,7 @@ namespace YanK
 					FilePath = path,
 					Entries = entries,
 					Tree = tree,
+					LeafCount = tree.CountLeaves(),
 					ConflictByGuid = conflictByGuid,
 					ConflictByPath = conflictByPath,
 					IsExpanded = true
@@ -322,7 +323,7 @@ namespace YanK
 			EditorGUILayout.BeginVertical(EditorStyles.helpBox);
 
 			EditorGUILayout.BeginHorizontal();
-			int total = pkg.Entries.Count;
+			int total = pkg.LeafCount;
 			int selected = pkg.SelectedCount;
 			string fileName = Path.GetFileName(pkg.FilePath);
 			pkg.IsExpanded = EditorGUILayout.Foldout(pkg.IsExpanded,

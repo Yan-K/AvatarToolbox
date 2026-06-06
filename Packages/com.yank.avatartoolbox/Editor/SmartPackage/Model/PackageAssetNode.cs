@@ -141,6 +141,19 @@ namespace YanK
 			}
 		}
 
+		// Counts importable leaf items (files, plus any empty-folder entry that never
+		// gained children). Folders that contain children are structure, not leaves.
+		public int CountLeaves()
+		{
+			if (!IsFolder)
+				return 1;
+
+			int total = 0;
+			for (int i = 0; i < Children.Count; i++)
+				total += Children[i].CountLeaves();
+			return total;
+		}
+
 		public long ComputeSize()
 		{
 			if (IsFolder)
@@ -216,6 +229,15 @@ namespace YanK
 						}
 						parent.Children.Add(node);
 						index[accum] = node;
+					}
+					else if (!isLeaf && !node.IsFolder)
+					{
+						// A previous entry created this node as a leaf (a .unitypackage can list a
+						// folder's own asset entry before any file inside it). Now that a deeper
+						// path travels through it, it must be a folder — promote it so its children
+						// are not hidden from the tree or skipped during import.
+						node.IsFolder = true;
+						node.Extension = null;
 					}
 
 					parent = node;

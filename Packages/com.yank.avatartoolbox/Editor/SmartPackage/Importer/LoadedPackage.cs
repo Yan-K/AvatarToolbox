@@ -21,5 +21,10 @@ namespace YanK
 		public int UpdateCount;
 		public int SelectedCount;
 		public int TallyVersion = -1;
+
+		// Total number of importable leaf items in the tree (files + empty folders),
+		// computed once after the tree is built. Used as the denominator on the package
+		// card so "select all" reads N / N instead of counting structural folder entries.
+		public int LeafCount;
 	}
 }
