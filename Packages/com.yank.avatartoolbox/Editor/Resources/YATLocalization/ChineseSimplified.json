@@ -223,6 +223,8 @@
     "yspSortAscending": "升序",
     "yspSelectAllShort": "全选",
     "yspDeselectAllShort": "清除",
+    "yspIncludeDependencies": "包含依赖资源",
+    "yspIncludeDependenciesTip": "开启时自动收集所选资源引用的所有相关资源；关闭时仅导出你添加的资源。",
     "yspExcludeExt": "排除扩展名",
     "yspExcludeNamesRegex": "排除名称 (正则)",
     "yspExcludedCount": "(已排除 {0})",

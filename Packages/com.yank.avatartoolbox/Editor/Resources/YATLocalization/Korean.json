@@ -223,6 +223,8 @@
     "yspSortAscending": "오름차순",
     "yspSelectAllShort": "전체",
     "yspDeselectAllShort": "해제",
+    "yspIncludeDependencies": "종속 항목 포함",
+    "yspIncludeDependenciesTip": "켜면 선택한 에셋이 참조하는 모든 에셋을 자동으로 수집합니다. 끄면 추가한 에셋만 내보냅니다.",
     "yspExcludeExt": "확장자 제외",
     "yspExcludeNamesRegex": "이름 제외 (정규식)",
     "yspExcludedCount": "(제외 {0})",

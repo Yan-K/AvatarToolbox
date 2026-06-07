@@ -223,6 +223,8 @@
     "yspSortAscending": "昇順",
     "yspSelectAllShort": "全選択",
     "yspDeselectAllShort": "解除",
+    "yspIncludeDependencies": "依存関係を含める",
+    "yspIncludeDependenciesTip": "オンの場合、選択したアセットが参照するすべてのアセットを自動的に収集します。オフの場合、追加したアセットのみをエクスポートします。",
     "yspExcludeExt": "除外する拡張子",
     "yspExcludeNamesRegex": "除外する名前 (正規表現)",
     "yspExcludedCount": "(除外 {0})",

@@ -223,6 +223,8 @@
     "yspSortAscending": "升冪",
     "yspSelectAllShort": "全選",
     "yspDeselectAllShort": "清除",
+    "yspIncludeDependencies": "包含相依資產",
+    "yspIncludeDependenciesTip": "開啟時自動收集所選資產引用的所有相關資產；關閉時僅匯出你加入的資產。",
     "yspExcludeExt": "排除副檔名",
     "yspExcludeNamesRegex": "排除名稱 (Regex)",
     "yspExcludedCount": "(已排除 {0})",

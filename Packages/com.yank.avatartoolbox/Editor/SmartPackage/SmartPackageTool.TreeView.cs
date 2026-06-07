@@ -121,14 +121,57 @@ namespace YanK
 		{
 			string path = node.FullPath;
 			if (string.IsNullOrEmpty(path))
-				return AssetPreview.GetMiniTypeThumbnail(node.IsFolder ? typeof(UnityEditor.DefaultAsset) : typeof(UnityEngine.Object));
+				return ResolveFallbackIcon(node);
 			if (s_IconCache.TryGetValue(path, out Texture cached))
 				return cached;
+
+			// Exporter rows point at assets that already exist in the project, so this
+			// returns the real per-type icon. Importer rows reference assets that aren't
+			// in the project yet, so it returns null and we fall back to an icon derived
+			// from the node's kind / file extension below.
 			Texture icon = AssetDatabase.GetCachedIcon(path);
 			if (icon == null)
-				icon = AssetPreview.GetMiniTypeThumbnail(node.IsFolder ? typeof(UnityEditor.DefaultAsset) : typeof(UnityEngine.Object));
+				icon = ResolveFallbackIcon(node);
 			s_IconCache[path] = icon;
 			return icon;
+		}
+
+		// Used when no project asset backs the row (mainly the importer): folders get
+		// the folder icon and files get an extension-based icon (.png / .anim / .prefab
+		// / .mat / .cs … each show their proper project-window icon) instead of a single
+		// generic icon for every file.
+		private static Texture ResolveFallbackIcon(PackageAssetNode node)
+		{
+			if (node.IsFolder)
+				return FolderIcon;
+
+			Texture icon = null;
+			if (!string.IsNullOrEmpty(node.Name))
+				icon = UnityEditorInternal.InternalEditorUtility.GetIconForFile(node.Name);
+			if (icon == null)
+				icon = AssetPreview.GetMiniTypeThumbnail(typeof(UnityEngine.Object));
+			return icon;
+		}
+
+		private static Texture s_FolderIcon;
+
+		// The real yellow folder icon. Package-internal folders don't exist in the
+		// project, so AssetDatabase.GetCachedIcon returns null for them; the built-in
+		// "Folder Icon" content is the reliable source, with the always-present "Assets"
+		// folder's icon as a final fallback.
+		private static Texture FolderIcon
+		{
+			get
+			{
+				if (s_FolderIcon == null)
+				{
+					GUIContent c = EditorGUIUtility.IconContent("Folder Icon");
+					s_FolderIcon = c != null ? c.image : null;
+					if (s_FolderIcon == null)
+						s_FolderIcon = AssetDatabase.GetCachedIcon("Assets");
+				}
+				return s_FolderIcon;
+			}
 		}
 
 		private void DrawNode(PackageAssetNode node, int depth)

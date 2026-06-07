@@ -12,7 +12,7 @@ namespace YanK
 			public string[] MissingDependencies;
 		}
 
-		public static CollectResult Collect(IEnumerable<string> rootPaths, bool includePackages = false)
+		public static CollectResult Collect(IEnumerable<string> rootPaths, bool includeDependencies = true, bool includePackages = false)
 		{
 			HashSet<string> seeds = new HashSet<string>();
 
@@ -40,12 +40,17 @@ namespace YanK
 			}
 
 			string[] seedArray = seeds.ToArray();
-			string[] deps = AssetDatabase.GetDependencies(seedArray, true);
+			// When dependency collection is disabled the export contains only the explicitly
+			// selected assets (folders already expanded to the files they directly contain),
+			// so referenced-but-unselected assets are not pulled in.
+			string[] candidates = includeDependencies
+				? AssetDatabase.GetDependencies(seedArray, true)
+				: seedArray;
 
 			HashSet<string> resolved = new HashSet<string>();
 			List<string> missing = new List<string>();
 
-			foreach (string d in deps)
+			foreach (string d in candidates)
 			{
 				if (string.IsNullOrEmpty(d))
 					continue;

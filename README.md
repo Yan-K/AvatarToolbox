@@ -113,7 +113,8 @@ UI/UX Unified, overall cleanup, changed language format.
 
 ### v1.1.0 - 2026/04/22
 
-Repository renamed from **Yan-K Material Editor** to **Yan-K Avatar Toolbox**. Added **Yan-K Blendshape Editor (YBE)**: group auto-detection, search/filter, real-time batch slider, shift-click range select, reset-to-zero/default, AnimationClip export (3 modes), AnimationClip import with live preview (4 modes), searchable grouped remap dropdown with fuzzy-name auto-match, and full 5-language localization.
+Repository renamed from **Yan-K Material Editor** to **Yan-K Avatar Toolbox**.
+Added **Yan-K Blendshape Editor (YBE)**.
 
 ### v1.2.0 - 2026/04/25
 
@@ -145,6 +146,10 @@ YSP Change: Better conflict display, UI QoL update, Multi-thread import.
 ### v1.5.1 - 2026/06/07
 
 YSC Change: Fixed import count error.
+
+### v1.5.2 - 2026/06/07
+
+YSC Change: Importer icon fix. Exporter dependency toggle.
 
 ## Credit
 

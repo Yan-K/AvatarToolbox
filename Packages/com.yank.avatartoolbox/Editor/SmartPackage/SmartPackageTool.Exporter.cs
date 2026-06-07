@@ -218,7 +218,7 @@ namespace YanK
 		private void ReloadFromSources()
 		{
 			DependencyCollector.CollectResult result =
-				DependencyCollector.Collect(pendingRootPaths);
+				DependencyCollector.Collect(pendingRootPaths, settings.IncludeDependencies);
 
 			missingDependencies = result.MissingDependencies ?? Array.Empty<string>();
 			rootNode = PackageAssetNode.BuildTree(result.AssetPaths ?? Array.Empty<string>());
@@ -365,18 +365,29 @@ namespace YanK
 
 			if (GUILayout.Button(L("yspReload", "Reload"), EditorStyles.toolbarButton, GUILayout.Width(80)))
 				ReloadFromSources();
-			if (DrawColoredToolbarButton(L("yspExport", "Export…"), 90))
+			// Export turns red in Destructive mode to warn that it will MOVE assets in the
+			// project (not just copy them into the package).
+			Color exportColor = settings.TopMode == FolderCollectionTopMode.Destructive
+				? YSP_DestructiveColor
+				: YSP_AccentColor;
+			if (DrawColoredToolbarButton(L("yspExport", "Export…"), 90, exportColor))
 				DoExport();
 
 			EditorGUILayout.EndHorizontal();
 		}
 
 		private static readonly Color YSP_AccentColor = new Color(0.88f, 0.54f, 0.17f, 1f);
+		private static readonly Color YSP_DestructiveColor = new Color(0.85f, 0.27f, 0.24f, 1f);
 
 		internal bool DrawColoredToolbarButton(string label, float width)
 		{
+			return DrawColoredToolbarButton(label, width, YSP_AccentColor);
+		}
+
+		internal bool DrawColoredToolbarButton(string label, float width, Color color)
+		{
 			Color prev = GUI.backgroundColor;
-			GUI.backgroundColor = YSP_AccentColor;
+			GUI.backgroundColor = color;
 			bool clicked = GUILayout.Button(label, EditorStyles.toolbarButton, GUILayout.Width(width));
 			GUI.backgroundColor = prev;
 			return clicked;
@@ -433,6 +444,21 @@ namespace YanK
 			if (GUILayout.Button(L("yspDeselectAllShort", "None"), EditorStyles.miniButtonRight))
 				SetAllLeaves(false);
 			EditorGUILayout.EndHorizontal();
+
+			GUILayout.Space(6);
+
+			// Include Dependencies — toggling re-collects, so reload the tree immediately.
+			bool newIncludeDeps = EditorGUILayout.ToggleLeft(
+				new GUIContent(
+					L("yspIncludeDependencies", "Include Dependencies"),
+					L("yspIncludeDependenciesTip", "When on, automatically collect all assets referenced by your selection. When off, export only the assets you added.")),
+				settings.IncludeDependencies);
+			if (newIncludeDeps != settings.IncludeDependencies)
+			{
+				settings.IncludeDependencies = newIncludeDeps;
+				settings.Save();
+				ReloadFromSources();
+			}
 
 			GUILayout.Space(6);
 
@@ -873,8 +899,12 @@ namespace YanK
 			for (int i = 0; i < moved.Count; i++)
 				remappedPaths[i] = moved[i].Value;
 
-			AssetDatabase.ExportPackage(remappedPaths, outPath,
-				ExportPackageOptions.Recurse | ExportPackageOptions.IncludeDependencies);
+			// Honor the sidebar "Include Dependencies" toggle at the final export step too,
+			// so referenced assets aren't re-pulled when the user turned collection off.
+			ExportPackageOptions exportOptions = ExportPackageOptions.Recurse;
+			if (settings.IncludeDependencies)
+				exportOptions |= ExportPackageOptions.IncludeDependencies;
+			AssetDatabase.ExportPackage(remappedPaths, outPath, exportOptions);
 
 			if (errors.Count > 0)
 			{

@@ -223,6 +223,8 @@
     "yspSortAscending": "Ascending",
     "yspSelectAllShort": "All",
     "yspDeselectAllShort": "None",
+    "yspIncludeDependencies": "Include Dependencies",
+    "yspIncludeDependenciesTip": "When on, automatically collect all assets referenced by your selection. When off, export only the assets you added.",
     "yspExcludeExt": "Exclude Extensions",
     "yspExcludeNamesRegex": "Exclude Names (Regex)",
     "yspExcludedCount": "(excluded {0})",
