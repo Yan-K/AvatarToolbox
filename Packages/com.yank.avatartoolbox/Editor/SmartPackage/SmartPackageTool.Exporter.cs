@@ -49,7 +49,11 @@ namespace YanK
 
 		private void EnsureExporterInit()
 		{
-			if (exporterInitialized) return;
+			// After a domain reload (e.g. importing assets that contain scripts) Unity can
+			// restore the bool init flag as true while leaving non-serialized references
+			// like `settings` null. Re-run init in that case so DrawToolbar never
+			// dereferences a null settings — mirrors InitStyles' defensive guard.
+			if (exporterInitialized && settings != null) return;
 			exporterInitialized = true;
 
 			settings = new ExporterSettings();

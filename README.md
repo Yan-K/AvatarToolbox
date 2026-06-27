@@ -151,6 +151,10 @@ YSC Change: Fixed import count error.
 
 YSC Change: Importer icon fix. Exporter dependency toggle.
 
+### v1.5.3 - 2026/06/28
+
+YSC Bug fix: GUI Null Exception after import.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

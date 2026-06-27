@@ -35,7 +35,10 @@ namespace YanK
 
 		private void EnsureImporterInit()
 		{
-			if (importerInitialized) return;
+			// Same domain-reload guard as the exporter: the bool flag can survive a reload
+			// as true while loadSemaphore (not serialized) comes back null, so re-init when
+			// the semaphore is missing to avoid null dereferences in the load pipeline.
+			if (importerInitialized && loadSemaphore != null) return;
 			importerInitialized = true;
 			importerPolicy = (ConflictPolicy)EditorPrefs.GetInt(Prefs.ConflictPolicy, (int)ConflictPolicy.Ask);
 			loadSemaphore = new SemaphoreSlim(System.Math.Max(1, System.Environment.ProcessorCount));
