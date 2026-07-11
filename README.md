@@ -67,6 +67,10 @@ Dependency-aware `.unitypackage` exporter and importer in one tabbed window.
 - **Multi-File Importer** — Drag-and-drop multiple `.unitypackage` files, preview entries, partial import with original GUIDs preserved
 - **Conflict Detection** — Per-entry New / Update / Path conflict / GUID conflict status with Overwrite / Skip / Ask policy
 
+### NonToon Converter
+
+- **Convert lilToon shader to NonToon**
+
 ### Shared
 
 - **Localization** — English, 简体中文, 繁體中文, 日本語, 한국어
@@ -154,6 +158,10 @@ YSC Change: Importer icon fix. Exporter dependency toggle.
 ### v1.5.3 - 2026/06/28
 
 YSC Bug fix: GUI Null Exception after import.
+
+### v1.6.0 - 2026/07/11
+
+Added **NonToon Converter**
 
 ## Credit
 
