@@ -39,6 +39,18 @@ namespace YanK
 				return;
 			}
 
+			// Pre-flight: offer to remove any lilToon Fake Shadow slots (they cause artifacts)
+			if (fakeShadowSlots.Count > 0)
+			{
+				var msg = new System.Text.StringBuilder();
+				msg.AppendLine($"Found {fakeShadowSlots.Count} Fake Shadow material slot(s) that will cause rendering artifacts:\n");
+				foreach (var s in fakeShadowSlots)
+					msg.AppendLine($"  {s.ObjectName}  (slot {s.materialIndex})");
+				msg.AppendLine("\nRemove only those slots from the renderers?");
+				if (EditorUtility.DisplayDialog("Fake Shadow Detected", msg.ToString(), "Remove Slots", "Skip"))
+					RemoveFakeShadowSlots();
+			}
+
 			// Pre-resolve mask overflow BEFORE StartAssetEditing (needs dialogs)
 			var maskChoices = options.BakeMasks
 				? PreResolveMaskOverflow(toConvert, options)
@@ -128,17 +140,8 @@ namespace YanK
 				dst.SetColor(P_RimLight + "RimLightColor", HdrToLdr(src.GetColor("_RimColor"), applyAlpha: true));
 			}
 
-			// 4. MatCaps (gated on _UseMatCap / _UseMatCap2nd; enable module + LDR-clamped colors)
-			bool useMatCap    = IsFeatureActive(src, "_UseMatCap");
-			bool useMatCap2nd = IsFeatureActive(src, "_UseMatCap2nd");
-			if ((useMatCap || useMatCap2nd) && dst.HasProperty(P_MatCaps + "Enable"))
-			{
-				SetModuleEnable(dst, P_MatCaps + "Enable", true);
-				if (useMatCap && src.HasProperty("_MatCapColor") && dst.HasProperty(P_MatCaps + "MatCapMultiplyColor"))
-					dst.SetColor(P_MatCaps + "MatCapMultiplyColor", HdrToLdr(src.GetColor("_MatCapColor"), applyAlpha: false));
-				if (useMatCap2nd && src.HasProperty("_MatCap2ndColor") && dst.HasProperty(P_MatCaps + "MatCapAddColor"))
-					dst.SetColor(P_MatCaps + "MatCapAddColor", HdrToLdr(src.GetColor("_MatCap2ndColor"), applyAlpha: false));
-			}
+			// 4. MatCaps — blend-mode-aware routing + blur bake
+			ApplyMatCaps(src, dst, folder, baseName);
 
 			// 5. Outline — port ONLY when the source uses an outline SHADER VARIANT
 			//    (Hidden/lilToonOutline, Hidden/lilToonCutoutOutline, Hidden/lilToonTransparentOutline,
@@ -323,6 +326,69 @@ namespace YanK
 			if (!string.IsNullOrEmpty(srcAssetPath))
 				return Path.GetDirectoryName(srcAssetPath).Replace('\\', '/');
 			return "Assets";
+		}
+
+		// =====================================================================
+		// MatCap — blend-mode routing + blur bake
+		// =====================================================================
+
+		/// <summary>
+		/// Routes each lilToon matcap to NonToon's Multiply or Add slot based on blend mode:
+		///   0 (Normal) / 3 (Multiply) → Multiply slot
+		///   1 (Add)    / 2 (Screen)   → Add slot
+		/// If both matcaps want the same slot the 2nd is pushed to the opposite slot.
+		/// If the source material has a Blur (Lod) value the texture is GPU-blurred before assigning.
+		/// </summary>
+		private static void ApplyMatCaps(Material src, Material dst, string folder, string baseName)
+		{
+			bool use1 = IsFeatureActive(src, "_UseMatCap");
+			bool use2 = IsFeatureActive(src, "_UseMatCap2nd");
+			if (!use1 && !use2) return;
+			if (!dst.HasProperty(P_MatCaps + "Enable")) return;
+
+			SetModuleEnable(dst, P_MatCaps + "Enable", true);
+
+			// Blend-mode → slot decision (true = Multiply, false = Add)
+			int mode1 = (use1 && src.HasProperty("_MatCapBlendMode"))    ? (int)src.GetFloat("_MatCapBlendMode")    : 1;
+			int mode2 = (use2 && src.HasProperty("_MatCap2ndBlendMode")) ? (int)src.GetFloat("_MatCap2ndBlendMode") : 1;
+			bool mul1 = mode1 == 0 || mode1 == 3; // Normal or Multiply
+			bool mul2 = mode2 == 0 || mode2 == 3;
+
+			// Resolve conflict: if both want same slot, push 2nd to the opposite slot.
+			if (use1 && use2 && mul1 == mul2) mul2 = !mul2;
+
+			if (use1)
+			{
+				string cProp = P_MatCaps + (mul1 ? "MatCapMultiplyColor" : "MatCapAddColor");
+				string tProp = P_MatCaps + (mul1 ? "MatCapMultiply"      : "MatCapAdd");
+				if (src.HasProperty("_MatCapColor") && dst.HasProperty(cProp))
+					dst.SetColor(cProp, HdrToLdr(src.GetColor("_MatCapColor"), applyAlpha: false));
+				AssignMatCapTex(src, "_MatCapTex",    "_MatCapLod",    dst, tProp, folder, baseName + "_MatCap1");
+			}
+			if (use2)
+			{
+				string cProp = P_MatCaps + (mul2 ? "MatCapMultiplyColor" : "MatCapAddColor");
+				string tProp = P_MatCaps + (mul2 ? "MatCapMultiply"      : "MatCapAdd");
+				if (src.HasProperty("_MatCap2ndColor") && dst.HasProperty(cProp))
+					dst.SetColor(cProp, HdrToLdr(src.GetColor("_MatCap2ndColor"), applyAlpha: false));
+				AssignMatCapTex(src, "_MatCap2ndTex", "_MatCap2ndLod", dst, tProp, folder, baseName + "_MatCap2");
+			}
+		}
+
+		private static void AssignMatCapTex(Material src, string srcTexProp, string lodProp,
+		                                     Material dst, string dstTexProp,
+		                                     string folder, string nameNoExt)
+		{
+			if (!src.HasProperty(srcTexProp) || !dst.HasProperty(dstTexProp)) return;
+			var srcTex = src.GetTexture(srcTexProp) as Texture2D;
+			if (srcTex == null) return;
+
+			float lod    = src.HasProperty(lodProp) ? src.GetFloat(lodProp) : 0f;
+			var   result = lod > 0.05f
+			               ? BakeBlurredTexture(srcTex, lod, folder, nameNoExt)
+			               : srcTex;
+
+			if (result != null) dst.SetTexture(dstTexProp, result);
 		}
 
 		// =====================================================================

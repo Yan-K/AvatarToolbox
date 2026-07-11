@@ -163,6 +163,10 @@ YSC Bug fix: GUI Null Exception after import.
 
 Added **NonToon Converter**
 
+### v1.6.1 - 2026/07/12
+
+YNC Bug fix: Fix MatCap Add/Multiply detection.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

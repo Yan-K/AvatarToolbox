@@ -501,6 +501,50 @@ namespace YanK
 			return px;
 		}
 
+		/// <summary>
+		/// Bake a blurred version of <paramref name="src"/> using multi-pass downsample/upsample
+		/// (cheap Gaussian approximation matching lilToon's Lod/Blur parameter).
+		/// <paramref name="lod"/> is lilToon's _MatCapLod range 0–10.
+		/// </summary>
+		private static Texture2D BakeBlurredTexture(Texture2D src, float lod, string folder, string nameNoExt)
+		{
+			if (src == null || lod <= 0.05f) return src;
+
+			var full = LoadFullResReadable(src);
+			int w = full.width, h = full.height;
+
+			// Map LOD 0-10 to blur passes 1-5 (each pass halves then doubles = 1 blur level).
+			int passes = Mathf.Clamp(Mathf.RoundToInt(lod * 0.5f), 1, 5);
+
+			var current = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
+			Graphics.Blit(full, current);
+
+			for (int i = 0; i < passes; i++)
+			{
+				int sw = Mathf.Max(1, w >> (i + 1)), sh = Mathf.Max(1, h >> (i + 1));
+				var smaller = RenderTexture.GetTemporary(sw, sh, 0, RenderTextureFormat.ARGB32);
+				Graphics.Blit(current, smaller);          // downsample → blurs via bilinear
+				RenderTexture.ReleaseTemporary(current);
+				current = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
+				Graphics.Blit(smaller, current);           // upsample → soft blur
+				RenderTexture.ReleaseTemporary(smaller);
+			}
+
+			var prev   = RenderTexture.active;
+			RenderTexture.active = current;
+			var outTex = new Texture2D(w, h, TextureFormat.RGBA32, false);
+			outTex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+			outTex.Apply();
+			RenderTexture.active = prev;
+			RenderTexture.ReleaseTemporary(current);
+
+			if (full != null && full != src) Object.DestroyImmediate(full);
+
+			var saved = SaveTexturePng(outTex, folder, nameNoExt + "_Blur_NTBake");
+			if (saved != null) CopyImportSettings(src, saved, asNormal: false);
+			return saved;
+		}
+
 		// =====================================================================
 		// Utilities
 		// =====================================================================

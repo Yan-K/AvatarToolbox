@@ -61,11 +61,8 @@ namespace YanK
 				enableCheck    = m => IsFeatureActive(m, "_UseReflection")
 			},
 
-			// --- MatCap textures (gated; colors + module-enable handled specially) ---
-			new PropMapping { sourceProp = "_MatCapTex", targetProp = P_MatCaps + "MatCapMultiply", kind = PropKind.Texture,
-			                  enableCheck = m => IsFeatureActive(m, "_UseMatCap") },
-			new PropMapping { sourceProp = "_MatCap2ndTex", targetProp = P_MatCaps + "MatCapAdd",   kind = PropKind.Texture,
-			                  enableCheck = m => IsFeatureActive(m, "_UseMatCap2nd") },
+			// --- MatCap textures & colors routed per blend-mode in ConvertMaterial (step 4) ---
+			// (texture assignments removed from here to avoid always-Multiply routing)
 		};
 
 		/// <summary>Fur-specific mappings.</summary>

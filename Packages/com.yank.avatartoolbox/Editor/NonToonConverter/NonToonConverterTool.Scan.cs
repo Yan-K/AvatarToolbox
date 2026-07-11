@@ -31,11 +31,20 @@ namespace YanK
 			public bool MaterialOnly => refs.Count == 0;
 		}
 
+		/// <summary>Tracks a single renderer material slot that uses lilToon Fake Shadow.</summary>
+		private class FakeShadowSlot
+		{
+			public Renderer renderer;
+			public int      materialIndex;
+			public string   ObjectName => renderer != null ? renderer.gameObject.name : "(null)";
+		}
+
 		// =====================================================================
 		// State
 		// =====================================================================
 
-		private readonly List<ConversionSlot> conversionSlots = new List<ConversionSlot>();
+		private readonly List<ConversionSlot>  conversionSlots  = new List<ConversionSlot>();
+		private readonly List<FakeShadowSlot>  fakeShadowSlots  = new List<FakeShadowSlot>();
 
 		// =====================================================================
 		// Scanning — always includes inactive renderers
@@ -86,6 +95,48 @@ namespace YanK
 
 			foreach (var slot in conversionSlots)
 				slot.warnings = GetUnsupportedFeatures(slot.material, IsFurMaterial(slot.material));
+
+			// Scan all renderer slots for lilToon Fake Shadow (different shader, not caught above)
+			fakeShadowSlots.Clear();
+			foreach (var root in roots)
+			{
+				if (!(root is GameObject go)) continue;
+				foreach (var renderer in go.GetComponentsInChildren<Renderer>(true))
+				{
+					var mats = renderer.sharedMaterials;
+					for (int i = 0; i < mats.Length; i++)
+						if (IsFakeShadow(mats[i]))
+							fakeShadowSlots.Add(new FakeShadowSlot { renderer = renderer, materialIndex = i });
+				}
+			}
+		}
+
+		private static bool IsFakeShadow(Material m) =>
+			m?.shader != null &&
+			m.shader.name.IndexOf("fakeshadow", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+		private void RemoveFakeShadowSlots()
+		{
+			var grouped = fakeShadowSlots
+				.Where(s => s.renderer != null)
+				.GroupBy(s => s.renderer)
+				.ToList();
+
+			foreach (var group in grouped)
+			{
+				var renderer = group.Key;
+				Undo.RecordObject(renderer, "Remove Fake Shadow Slot");
+				var mats = new System.Collections.Generic.List<Material>(renderer.sharedMaterials);
+				// Remove highest indices first so lower indices stay valid
+				foreach (var s in group.OrderByDescending(x => x.materialIndex))
+					if (s.materialIndex < mats.Count) mats.RemoveAt(s.materialIndex);
+				renderer.sharedMaterials = mats.ToArray();
+				EditorUtility.SetDirty(renderer);
+			}
+
+			fakeShadowSlots.Clear();
+			ScanMaterials();
+			Repaint();
 		}
 
 		// =====================================================================
