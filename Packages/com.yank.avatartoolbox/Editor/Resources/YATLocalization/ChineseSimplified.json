@@ -343,5 +343,19 @@
     "ncBakeNormalMapTooltip": "平铺/偏移非默认时重新烘焙法线图",
     "ncBakeMasks": "打包 SharedMask",
     "ncBakeMasksTooltip": "将各功能遮罩打包至 NonToon RGBA SharedMask 贴图",
-    "ncBakeAtOwnRisk": "烘焙结果可能不准确。"
+    "ncBakeAtOwnRisk": "烘焙结果可能不准确。",
+    "ncPipelineCopy": "管线复制",
+    "ncDropMore": "在此拖放更多…",
+    "ncUpdate": "更新",
+    "ncUpdateTooltip": "有新版本可用。点击查看下载选项。",
+    "ncUpdateTitle": "有可用更新",
+    "ncUpdateVia": "请选择更新的下载来源：",
+    "ncUpdateBooth": "Booth",
+    "ncUpdateVCC": "VCC / ALCOM",
+    "ncUpdateGithub": "GitHub",
+    "ncUpdateSkip": "跳过此次更新",
+    "ncUpdateSkipConfirmTitle": "跳过更新",
+    "ncUpdateSkipConfirm": "这将隐藏更新提示，直到下一个版本发布。确定要跳过此次更新吗？",
+    "ncUpdateSkipConfirmYes": "是，跳过",
+    "ncUpdateSkipConfirmNo": "否，继续提醒"
 }

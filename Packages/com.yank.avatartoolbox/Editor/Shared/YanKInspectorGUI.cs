@@ -95,10 +95,14 @@ namespace YanK
 		public static void DrawHeaderRow(string title)
 		{
 			EnsureStyles();
+			YanKUpdateChecker.EnsureChecked();
 			GUILayout.Space(8);
 			EditorGUILayout.BeginHorizontal();
 			EditorGUILayout.LabelField(title, _sectionHeaderStyle, GUILayout.ExpandWidth(false));
 			GUILayout.FlexibleSpace();
+
+			if (YanKUpdateChecker.ShouldShowButton())
+				YanKUpdateChecker.DrawUpdateButton();
 
 			var langs = YanKLocalization.Languages;
 			if (langs.Count > 0)

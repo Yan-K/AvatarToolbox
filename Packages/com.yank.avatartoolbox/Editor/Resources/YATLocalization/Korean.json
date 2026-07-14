@@ -343,5 +343,19 @@
     "ncBakeNormalMapTooltip": "타일링/오프셋이 다를 때 재베이크",
     "ncBakeMasks": "SharedMask 패킹",
     "ncBakeMasksTooltip": "기능별 마스크를 NonToon RGBA SharedMask 텍스처에 패킹",
-    "ncBakeAtOwnRisk": "베이크 결과가 정확하지 않을 수 있습니다."
+    "ncBakeAtOwnRisk": "베이크 결과가 정확하지 않을 수 있습니다.",
+    "ncPipelineCopy": "파이프라인 복사",
+    "ncDropMore": "여기에 더 드롭…",
+    "ncUpdate": "업데이트",
+    "ncUpdateTooltip": "새 버전을 사용할 수 있습니다. 클릭하여 다운로드 옵션을 확인하세요.",
+    "ncUpdateTitle": "업데이트 사용 가능",
+    "ncUpdateVia": "업데이트를 다운로드할 위치를 선택하세요:",
+    "ncUpdateBooth": "Booth",
+    "ncUpdateVCC": "VCC / ALCOM",
+    "ncUpdateGithub": "GitHub",
+    "ncUpdateSkip": "이번 업데이트 건너뛰기",
+    "ncUpdateSkipConfirmTitle": "업데이트 건너뛰기",
+    "ncUpdateSkipConfirm": "다음 릴리스까지 업데이트 알림이 숨겨집니다. 이번 업데이트를 건너뛰시겠습니까?",
+    "ncUpdateSkipConfirmYes": "예, 건너뛰기",
+    "ncUpdateSkipConfirmNo": "아니요, 계속 알림"
 }

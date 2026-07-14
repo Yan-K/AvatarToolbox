@@ -343,5 +343,19 @@
     "ncBakeNormalMapTooltip": "當拼貼/偏移非預設時重新烘焙法線圖",
     "ncBakeMasks": "封裝 SharedMask",
     "ncBakeMasksTooltip": "將各功能遮罩封裝入 NonToon RGBA SharedMask 貼圖",
-    "ncBakeAtOwnRisk": "烘焙結果可能不正確。"
+    "ncBakeAtOwnRisk": "烘焙結果可能不正確。",
+    "ncPipelineCopy": "管線複製",
+    "ncDropMore": "在此拖放更多…",
+    "ncUpdate": "更新",
+    "ncUpdateTooltip": "有新版本可用。點擊查看下載選項。",
+    "ncUpdateTitle": "有可用更新",
+    "ncUpdateVia": "請選擇更新的下載來源：",
+    "ncUpdateBooth": "Booth",
+    "ncUpdateVCC": "VCC / ALCOM",
+    "ncUpdateGithub": "GitHub",
+    "ncUpdateSkip": "略過此次更新",
+    "ncUpdateSkipConfirmTitle": "略過更新",
+    "ncUpdateSkipConfirm": "這將隱藏更新提示，直到下一個版本發布。確定要略過此次更新嗎？",
+    "ncUpdateSkipConfirmYes": "是，略過",
+    "ncUpdateSkipConfirmNo": "否，繼續提醒"
 }

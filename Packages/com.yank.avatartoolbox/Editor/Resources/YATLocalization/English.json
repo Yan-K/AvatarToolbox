@@ -343,5 +343,19 @@
     "ncBakeNormalMapTooltip": "Re-bake normal map when tiling/offset is non-default",
     "ncBakeMasks": "Pack SharedMask",
     "ncBakeMasksTooltip": "Pack per-feature masks into NonToon RGBA SharedMask texture",
-    "ncBakeAtOwnRisk": "Baked results may not be accurate."
+    "ncBakeAtOwnRisk": "Baked results may not be accurate.",
+    "ncPipelineCopy": "Pipeline Copy",
+    "ncDropMore": "Drop more here…",
+    "ncUpdate": "Update",
+    "ncUpdateTooltip": "A newer version is available. Click for download options.",
+    "ncUpdateTitle": "Update Available",
+    "ncUpdateVia": "Choose where to download the update:",
+    "ncUpdateBooth": "Booth",
+    "ncUpdateVCC": "VCC / ALCOM",
+    "ncUpdateGithub": "GitHub",
+    "ncUpdateSkip": "Skip this update",
+    "ncUpdateSkipConfirmTitle": "Skip Update",
+    "ncUpdateSkipConfirm": "This will hide the update notice until the next release. Skip this update?",
+    "ncUpdateSkipConfirmYes": "Yes, Skip",
+    "ncUpdateSkipConfirmNo": "No, Keep Reminding"
 }

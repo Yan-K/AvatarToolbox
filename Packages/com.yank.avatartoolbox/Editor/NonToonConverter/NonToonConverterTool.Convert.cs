@@ -95,7 +95,19 @@ namespace YanK
 				L("ncConvertDoneTitle", "Conversion Complete"),
 				string.Format(L("ncConvertDone", "Converted {0} material(s). {1} failed."), succeeded, failed), "OK");
 
-			ScanMaterials();
+			if (failed == 0)
+			{
+				// Everything converted cleanly — clear the drop area so it's ready for the next batch.
+				roots.Clear();
+				conversionSlots.Clear();
+				fakeShadowSlots.Clear();
+				selectAll = false;
+			}
+			else
+			{
+				// Keep the roots so the user can inspect/retry the failed material(s).
+				ScanMaterials();
+			}
 			Repaint();
 		}
 
@@ -333,29 +345,55 @@ namespace YanK
 		// =====================================================================
 
 		/// <summary>
-		/// Routes each lilToon matcap to NonToon's Multiply or Add slot based on blend mode:
-		///   0 (Normal) / 3 (Multiply) → Multiply slot
-		///   1 (Add)    / 2 (Screen)   → Add slot
-		/// If both matcaps want the same slot the 2nd is pushed to the opposite slot.
-		/// If the source material has a Blur (Lod) value the texture is GPU-blurred before assigning.
+		/// Decides how lilToon's two matcap slots map onto NonToon's single Multiply slot and single
+		/// Add slot:
+		///   3 (Multiply)                      → Multiply slot
+		///   0 (Normal) / 1 (Add) / 2 (Screen)  → Add slot
+		/// NonToon has ONLY one Multiply and one Add slot, so if both lilToon matcaps request the SAME
+		/// slot, the 2nd matcap is DROPPED entirely (not remapped to the other slot — silently changing
+		/// its blend mode would be wrong). Shared by mask-candidate collection (Bake.cs) and value
+		/// assignment (below) so both agree on which matcap uses which slot / whether it was dropped.
+		/// </summary>
+		private static void DecideMatCapRouting(Material src,
+		                                         out bool use1, out bool mul1,
+		                                         out bool use2, out bool mul2,
+		                                         out bool drop2)
+		{
+			use1 = IsFeatureActive(src, "_UseMatCap");
+			use2 = IsFeatureActive(src, "_UseMatCap2nd");
+
+			int mode1 = (use1 && src.HasProperty("_MatCapBlendMode"))    ? (int)src.GetFloat("_MatCapBlendMode")    : 1;
+			int mode2 = (use2 && src.HasProperty("_MatCap2ndBlendMode")) ? (int)src.GetFloat("_MatCap2ndBlendMode") : 1;
+			mul1 = mode1 == 3; // Multiply only — Normal/Add/Screen all route to the Add slot
+			mul2 = mode2 == 3;
+
+			drop2 = false;
+			if (use1 && use2 && mul1 == mul2)
+			{
+				// Both matcaps want the same NonToon slot — NonToon can't host 2× Multiply or 2× Add,
+				// so drop the 2nd rather than silently reassigning its blend mode.
+				drop2 = true;
+				use2  = false;
+			}
+		}
+
+		/// <summary>
+		/// Applies matcap colors/textures using <see cref="DecideMatCapRouting"/>. If the source
+		/// material has a Blur (Lod) value the texture is GPU-blurred before assigning.
 		/// </summary>
 		private static void ApplyMatCaps(Material src, Material dst, string folder, string baseName)
 		{
-			bool use1 = IsFeatureActive(src, "_UseMatCap");
-			bool use2 = IsFeatureActive(src, "_UseMatCap2nd");
+			DecideMatCapRouting(src, out bool use1, out bool mul1, out bool use2, out bool mul2, out bool drop2);
 			if (!use1 && !use2) return;
 			if (!dst.HasProperty(P_MatCaps + "Enable")) return;
 
 			SetModuleEnable(dst, P_MatCaps + "Enable", true);
 
-			// Blend-mode → slot decision (true = Multiply, false = Add)
-			int mode1 = (use1 && src.HasProperty("_MatCapBlendMode"))    ? (int)src.GetFloat("_MatCapBlendMode")    : 1;
-			int mode2 = (use2 && src.HasProperty("_MatCap2ndBlendMode")) ? (int)src.GetFloat("_MatCap2ndBlendMode") : 1;
-			bool mul1 = mode1 == 0 || mode1 == 3; // Normal or Multiply
-			bool mul2 = mode2 == 0 || mode2 == 3;
-
-			// Resolve conflict: if both want same slot, push 2nd to the opposite slot.
-			if (use1 && use2 && mul1 == mul2) mul2 = !mul2;
+			if (drop2)
+			{
+				Debug.Log($"[YNC] {src.name}: 2nd MatCap uses the same blend mode as the 1st — " +
+				          "dropped (NonToon only supports one Multiply and one Add MatCap slot).");
+			}
 
 			if (use1)
 			{

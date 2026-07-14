@@ -167,6 +167,11 @@ Added **NonToon Converter**
 
 YNC Bug fix: Fix MatCap Add/Multiply detection.
 
+### v1.7.0 - 2026/07/14
+
+Added online update check.
+YNC Bug fix: better emission mask and matcap detection, fix drag and drop ui height.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

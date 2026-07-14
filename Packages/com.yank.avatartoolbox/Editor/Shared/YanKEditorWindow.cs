@@ -174,12 +174,18 @@ namespace YanK
 				LoadLocalizedStrings();
 			}
 
-			// Row 1: Title + Language selector + Version badge
+			// Check (throttled) for a newer Yan-K Avatar Toolbox release.
+			YanKUpdateChecker.EnsureChecked();
+
+			// Row 1: Title + Update button + Language selector + Version badge
 			EditorGUILayout.BeginHorizontal();
 
 			EditorGUILayout.LabelField(L(ToolTitleKey, ToolTitleDefault), sectionHeaderStyle, GUILayout.ExpandWidth(false));
 
 			GUILayout.FlexibleSpace();
+
+			if (YanKUpdateChecker.ShouldShowButton())
+				YanKUpdateChecker.DrawUpdateButton();
 
 			int newIndex = EditorGUILayout.Popup(selectedLanguageIndex, availableLanguages.ToArray(), GUILayout.Width(120));
 			if (newIndex != selectedLanguageIndex)

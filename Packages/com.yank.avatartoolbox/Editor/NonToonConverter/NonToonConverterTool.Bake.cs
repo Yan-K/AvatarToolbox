@@ -69,13 +69,24 @@ namespace YanK
 			return result;
 		}
 
+		// Below this alpha, lilToon's emission is effectively invisible — treat it as OFF (B1 fix).
+		private const float EmissionAlphaThreshold = 0.01f;
+
+		private static bool HasEmissionAlpha(Material src)
+		{
+			// No _EmissionColor property → no alpha-as-strength semantics; treat as active.
+			if (!src.HasProperty("_EmissionColor")) return true;
+			return src.GetColor("_EmissionColor").a > EmissionAlphaThreshold;
+		}
+
 		private static List<MaskCandidate> CollectMaskCandidates(Material src, ConverterOptions opt)
 		{
 			var list = new List<MaskCandidate>();
 			if (!opt.BakeMasks) return list;
 
-			// 1. Emission mask — PRIORITY
-			if (opt.BakeEmission && IsFeatureActive(src, "_UseEmission"))
+			// 1. Emission mask — PRIORITY (gated on alpha: lilToon _EmissionColor.a is the emission
+			//    strength; near-zero alpha means emission is effectively off, so don't port it).
+			if (opt.BakeEmission && IsFeatureActive(src, "_UseEmission") && HasEmissionAlpha(src))
 			{
 				list.Add(new MaskCandidate
 				{
@@ -86,24 +97,25 @@ namespace YanK
 				});
 			}
 
-			// 2. MatCap Multiply blend mask
-			if (IsFeatureActive(src, "_UseMatCap") && HasNonNullTex(src, "_MatCapBlendMask"))
+			// 2 & 3. MatCap blend masks — routed to whichever NonToon slot (Multiply/Add) the matcap
+			// itself was routed to (see DecideMatCapRouting); the 2nd matcap's mask is skipped when
+			// the 2nd matcap itself was dropped (same blend mode as the 1st).
+			DecideMatCapRouting(src, out bool mcUse1, out bool mcMul1, out bool mcUse2, out bool mcMul2, out _);
+			if (mcUse1 && HasNonNullTex(src, "_MatCapBlendMask"))
 			{
 				list.Add(new MaskCandidate
 				{
-					featureName     = "MatCap Multiply Mask",
-					maskChannelProp = P_MatCaps + "MatCapMultiplyMaskChannel",
+					featureName     = mcMul1 ? "MatCap Multiply Mask" : "MatCap Add Mask",
+					maskChannelProp = P_MatCaps + (mcMul1 ? "MatCapMultiplyMaskChannel" : "MatCapAddMaskChannel"),
 					srcMask         = src.GetTexture("_MatCapBlendMask"),
 				});
 			}
-
-			// 3. MatCap 2nd blend mask
-			if (IsFeatureActive(src, "_UseMatCap2nd") && HasNonNullTex(src, "_MatCap2ndBlendMask"))
+			if (mcUse2 && HasNonNullTex(src, "_MatCap2ndBlendMask"))
 			{
 				list.Add(new MaskCandidate
 				{
-					featureName     = "MatCap Add Mask",
-					maskChannelProp = P_MatCaps + "MatCapAddMaskChannel",
+					featureName     = mcMul2 ? "MatCap Multiply Mask" : "MatCap Add Mask",
+					maskChannelProp = P_MatCaps + (mcMul2 ? "MatCapMultiplyMaskChannel" : "MatCapAddMaskChannel"),
 					srcMask         = src.GetTexture("_MatCap2ndBlendMask"),
 				});
 			}
@@ -409,7 +421,7 @@ namespace YanK
 
 				Color[] gray;
 				if (cand.isEmission)
-					gray = BakeEmissionToGrayscale(src, w, h);
+					gray = BakeEmissionToGrayscale(src, w, h, cand.srcMask);
 				else
 					gray = SampleMaskGrayscale(cand.srcMask, w, h);
 
@@ -447,31 +459,52 @@ namespace YanK
 				dst.SetTexture("_SharedMask", sharedMask);
 		}
 
-		private static Color[] BakeEmissionToGrayscale(Material src, int targetW, int targetH)
+		/// <summary>
+		/// Bakes lilToon emission (map × color, with alpha as strength — B1) into a grayscale buffer,
+		/// then multiplies in <paramref name="blendMask"/> if the source used `_EmissionBlendMask`
+		/// (B2) — that mask cuts OUT parts of the emission map/color; it is a SEPARATE texture from
+		/// `_EmissionMap`.
+		/// </summary>
+		private static Color[] BakeEmissionToGrayscale(Material src, int targetW, int targetH, Texture blendMask)
 		{
 			var emTex = src.HasProperty("_EmissionMap") ? src.GetTexture("_EmissionMap") : null;
 			Color emColor = src.HasProperty("_EmissionColor") ? src.GetColor("_EmissionColor") : Color.white;
-			float lumaBias = 0.299f * emColor.r + 0.587f * emColor.g + 0.114f * emColor.b;
+			float luma  = 0.299f * emColor.r + 0.587f * emColor.g + 0.114f * emColor.b;
+			// B1: alpha is the emission strength in lilToon — fold it into the bias.
+			float alpha = src.HasProperty("_EmissionColor") ? Mathf.Clamp01(emColor.a) : 1f;
+			float bias  = luma * alpha;
 
 			Color[] basePixels;
 			if (emTex != null)
 			{
 				basePixels = SampleMaskGrayscale(emTex, targetW, targetH, useLuma: true);
+				for (int i = 0; i < basePixels.Length; i++)
+				{
+					float v = basePixels[i].r * bias;
+					basePixels[i] = new Color(v, v, v, 1f);
+				}
 			}
 			else
 			{
 				basePixels = new Color[targetW * targetH];
 				for (int i = 0; i < basePixels.Length; i++)
-					basePixels[i] = new Color(lumaBias, lumaBias, lumaBias, 1f);
-				return basePixels;
+					basePixels[i] = new Color(bias, bias, bias, 1f);
 			}
 
-			// Apply emission color luma as scale
-			for (int i = 0; i < basePixels.Length; i++)
+			// B2: multiply in the separate emission blend mask, if any.
+			if (blendMask != null)
 			{
-				float v = basePixels[i].r * lumaBias;
-				basePixels[i] = new Color(v, v, v, 1f);
+				var maskPixels = SampleMaskGrayscale(blendMask, targetW, targetH);
+				if (maskPixels != null)
+				{
+					for (int i = 0; i < basePixels.Length; i++)
+					{
+						float v = basePixels[i].r * maskPixels[i].r;
+						basePixels[i] = new Color(v, v, v, 1f);
+					}
+				}
 			}
+
 			return basePixels;
 		}
 

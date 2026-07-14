@@ -343,5 +343,19 @@
     "ncBakeNormalMapTooltip": "タイリング/オフセットがデフォルト以外の場合に再ベーク",
     "ncBakeMasks": "SharedMaskをパック",
     "ncBakeMasksTooltip": "機能別マスクをNonToonのRGBA SharedMaskテクスチャにパック",
-    "ncBakeAtOwnRisk": "ベーク結果は正確でない場合があります。"
+    "ncBakeAtOwnRisk": "ベーク結果は正確でない場合があります。",
+    "ncPipelineCopy": "パイプラインコピー",
+    "ncDropMore": "ここにさらにドロップ…",
+    "ncUpdate": "更新",
+    "ncUpdateTooltip": "新しいバージョンがあります。クリックしてダウンロード方法を確認してください。",
+    "ncUpdateTitle": "アップデートがあります",
+    "ncUpdateVia": "アップデートのダウンロード先を選択してください：",
+    "ncUpdateBooth": "Booth",
+    "ncUpdateVCC": "VCC / ALCOM",
+    "ncUpdateGithub": "GitHub",
+    "ncUpdateSkip": "このアップデートをスキップ",
+    "ncUpdateSkipConfirmTitle": "アップデートをスキップ",
+    "ncUpdateSkipConfirm": "次のリリースまでアップデート通知が非表示になります。スキップしますか？",
+    "ncUpdateSkipConfirmYes": "はい、スキップする",
+    "ncUpdateSkipConfirmNo": "いいえ、通知を続ける"
 }

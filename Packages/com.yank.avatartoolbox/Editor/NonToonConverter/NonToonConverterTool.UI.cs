@@ -208,10 +208,20 @@ namespace YanK
 			}
 			else
 			{
-				// Populated: show the item list; the whole list is the drop target
+				// Populated: show the item list (scrollable, capped height); the whole area is the
+				// drop target so users can keep dropping more items without the panel growing forever.
 				EditorGUILayout.BeginVertical();
 
 				var toRemove = new List<UnityEngine.Object>();
+
+				// Size the scroll view to the actual row content height and only clamp once it
+				// exceeds the max — EditorGUILayout.BeginScrollView otherwise always stretches to
+				// GUILayout.MaxHeight regardless of how little content it holds.
+				const float maxListHeight = 300f;
+				float rowHeight  = EditorGUIUtility.singleLineHeight + 2f;
+				float listHeight = Mathf.Min(roots.Count * rowHeight, maxListHeight);
+
+				rootsScroll = EditorGUILayout.BeginScrollView(rootsScroll, GUILayout.Height(listHeight));
 				foreach (var root in roots)
 				{
 					EditorGUILayout.BeginHorizontal();
@@ -222,6 +232,7 @@ namespace YanK
 						toRemove.Add(root);
 					EditorGUILayout.EndHorizontal();
 				}
+				EditorGUILayout.EndScrollView();
 
 				// Footer row: drop-more hint + Clear All
 				EditorGUILayout.BeginHorizontal();

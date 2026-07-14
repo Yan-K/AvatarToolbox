@@ -20,6 +20,7 @@ namespace YanK
 
 		private readonly List<UnityEngine.Object> roots = new List<UnityEngine.Object>();
 		private Vector2 scrollPosition;
+		private Vector2 rootsScroll;
 		private bool   selectAll;
 		private string searchFilter = "";
 
