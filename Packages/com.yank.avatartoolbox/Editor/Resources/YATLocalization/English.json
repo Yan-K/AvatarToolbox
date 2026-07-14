@@ -357,5 +357,10 @@
     "ncUpdateSkipConfirmTitle": "Skip Update",
     "ncUpdateSkipConfirm": "This will hide the update notice until the next release. Skip this update?",
     "ncUpdateSkipConfirmYes": "Yes, Skip",
-    "ncUpdateSkipConfirmNo": "No, Keep Reminding"
+    "ncUpdateSkipConfirmNo": "No, Keep Reminding",
+    "ncConvertFur": "Convert Fur",
+    "ncConvertFurTooltip": "Convert lilToon Fur materials to NonToonFur. OFF leaves Fur materials completely unconverted (they stay lilToon).",
+    "ncAllSelectedAreFur": "All selected materials are Fur materials, and Convert Fur is off in Advanced Settings — nothing to convert.",
+    "ncConvertSkippedFur": "{0} Fur material(s) skipped (Convert Fur is off — left as lilToon).",
+    "ncTargetSkipped": "⏭ Skipped (Fur)"
 }

@@ -43,6 +43,10 @@ namespace YanK
 			RefreshLanguageFiles();
 			LoadDefaultLanguage();
 			LoadLocalizedStrings();
+
+			// Re-check for updates every time a tool window is opened/reopened, bypassing the
+			// per-OnGUI throttle so the button always reflects the latest release on open.
+			YanKUpdateChecker.CheckOnWindowOpen();
 		}
 
 		// --- Styles ---

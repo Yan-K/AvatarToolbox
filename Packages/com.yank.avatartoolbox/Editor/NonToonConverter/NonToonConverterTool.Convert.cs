@@ -17,13 +17,36 @@ namespace YanK
 
 		private void ConvertSelected()
 		{
-			var toConvert = conversionSlots.Where(s => s.selected && s.material != null).ToList();
-			if (toConvert.Count == 0)
+			var selected = conversionSlots.Where(s => s.selected && s.material != null).ToList();
+			if (selected.Count == 0)
 			{
 				EditorUtility.DisplayDialog(
 					L("ncConvertDoneTitle", "Conversion Complete"),
 					L("ncNoSelection",      "Select at least one material to convert."), "OK");
 				return;
+			}
+
+			// "Convert Fur" OFF means Fur materials are left completely untouched (stay lilToon) —
+			// filter them out of this batch entirely rather than converting them without fur data.
+			var toConvert  = selected;
+			int skippedFur = 0;
+			if (!options.ConvertFur)
+			{
+				toConvert = new List<ConversionSlot>();
+				foreach (var s in selected)
+				{
+					if (IsFurMaterial(s.material)) skippedFur++;
+					else toConvert.Add(s);
+				}
+
+				if (toConvert.Count == 0)
+				{
+					EditorUtility.DisplayDialog(
+						L("ncConvertDoneTitle", "Conversion Complete"),
+						L("ncAllSelectedAreFur", "All selected materials are Fur materials, and Convert Fur is off in Advanced Settings — nothing to convert."),
+						"OK");
+					return;
+				}
 			}
 
 			if (!EditorUtility.DisplayDialog(
@@ -91,9 +114,10 @@ namespace YanK
 			}
 
 			Undo.CollapseUndoOperations(undoGroup);
-			EditorUtility.DisplayDialog(
-				L("ncConvertDoneTitle", "Conversion Complete"),
-				string.Format(L("ncConvertDone", "Converted {0} material(s). {1} failed."), succeeded, failed), "OK");
+			string doneMessage = string.Format(L("ncConvertDone", "Converted {0} material(s). {1} failed."), succeeded, failed);
+			if (skippedFur > 0)
+				doneMessage += "\n" + string.Format(L("ncConvertSkippedFur", "{0} Fur material(s) skipped (Convert Fur is off — left as lilToon)."), skippedFur);
+			EditorUtility.DisplayDialog(L("ncConvertDoneTitle", "Conversion Complete"), doneMessage, "OK");
 
 			if (failed == 0)
 			{
@@ -118,6 +142,9 @@ namespace YanK
 		private Material ConvertMaterial(ConversionSlot slot, ConverterOptions opt, List<MaskCandidate> resolvedMasks)
 		{
 			var src = slot.material;
+			// NOTE: ConvertSelected() already filters Fur materials out of the batch entirely when
+			// opt.ConvertFur is off (they must stay untouched lilToon), so by the time we get here
+			// it's always safe to detect Fur from the shader alone.
 			bool   isFur        = IsFurMaterial(src);
 			string targetName   = isFur ? NonToonFurShaderName : NonToonShaderName;
 			var    targetShader = Shader.Find(targetName);
@@ -143,7 +170,11 @@ namespace YanK
 
 			// 2. Core visual mappings (prefixed module names)
 			ApplyMappings(src, dst, CoreMappings, isFurOnly: false);
-			if (isFur) ApplyMappings(src, dst, FurMappings, isFurOnly: true);
+			if (isFur)
+			{
+				ApplyMappings(src, dst, FurMappings, isFurOnly: true);
+				ApplyFurVector(src, dst);
+			}
 
 			// 3. RimLight (gated on _UseRim; HDR→LDR + alpha→darkness)
 			if (IsFeatureActive(src, "_UseRim") &&
@@ -309,7 +340,13 @@ namespace YanK
 						    srcType != UnityEngine.Rendering.ShaderPropertyType.Int) break;
 						float fv = src.GetFloat(m.sourceProp);
 						if (m.floatTransform != null) fv = m.floatTransform(fv);
-						dst.SetFloat(m.targetProp, fv);
+						// Destination may be a true Integer shader property (e.g. NonToon's
+						// _FurSubdivision is SC_uint) — SetFloat on those throws "already exists
+						// with a different type", so branch the same way SetIntIfExists does.
+						if (GetPropType(dst, m.targetProp) == UnityEngine.Rendering.ShaderPropertyType.Int)
+							dst.SetInteger(m.targetProp, Mathf.RoundToInt(fv));
+						else
+							dst.SetFloat(m.targetProp, fv);
 						break;
 					case PropKind.Vector:
 						if (srcType != UnityEngine.Rendering.ShaderPropertyType.Vector &&
@@ -427,6 +464,45 @@ namespace YanK
 			               : srcTex;
 
 			if (result != null) dst.SetTexture(dstTexProp, result);
+		}
+
+		// =====================================================================
+		// Fur vector — direction + length combine differently between shaders
+		// =====================================================================
+
+		/// <summary>
+		/// lilToon's <c>_FurVector</c> is (direction.xyz, length.w) — the shader normalizes xyz
+		/// then multiplies by w to get the final tangent-space offset. NonToon's <c>_FurVector</c>
+		/// has NO separate length: its raw xyz magnitude IS the fur length (no per-shader
+		/// normalize step). A straight copy would keep lilToon's unit direction and drop the
+		/// length entirely, so bake direction×length into xyz here instead (w stays 0, matching
+		/// NonToon's own default and its [SCVector3] editor drawer which hides w).
+		/// </summary>
+		private static void ApplyFurVector(Material src, Material dst)
+		{
+			const string prop = "_FurVector";
+			if (!src.HasProperty(prop) || !dst.HasProperty(prop)) return;
+
+			Vector4 v = src.GetVector(prop);
+			// lilToon adds a small Z epsilon before normalizing so an all-zero direction still
+			// resolves to a sane default (pointing along the normal) instead of NaN.
+			Vector3 dir    = (new Vector3(v.x, v.y, v.z) + new Vector3(0f, 0f, 0.001f)).normalized;
+			Vector3 result = dir * v.w;
+
+			// Bake in _FurGravity — NonToon has no separate gravity property at all, so lilToon's
+			// per-vertex world-space bend ("furVector.y -= _FurGravity * length(furVector)", applied
+			// AFTER the object→world transform in lil_common_vert_fur.hlsl) has to be folded into this
+			// static vector instead. Best-effort approximation: real lilToon gravity depends on each
+			// vertex's world-space orientation, which isn't available at material-conversion time, so
+			// we apply the same subtraction directly to the un-transformed vector.
+			if (src.HasProperty("_FurGravity"))
+			{
+				float gravity = src.GetFloat("_FurGravity");
+				if (gravity != 0f)
+					result.y -= gravity * result.magnitude;
+			}
+
+			dst.SetVector(prop, new Vector4(result.x, result.y, result.z, 0f));
 		}
 
 		// =====================================================================

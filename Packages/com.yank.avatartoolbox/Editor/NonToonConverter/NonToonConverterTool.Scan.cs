@@ -94,7 +94,7 @@ namespace YanK
 			}
 
 			foreach (var slot in conversionSlots)
-				slot.warnings = GetUnsupportedFeatures(slot.material, IsFurMaterial(slot.material));
+				slot.warnings = GetUnsupportedFeatures(slot.material, options.ConvertFur && IsFurMaterial(slot.material));
 
 			// Scan all renderer slots for lilToon Fake Shadow (different shader, not caught above)
 			fakeShadowSlots.Clear();

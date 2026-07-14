@@ -357,5 +357,10 @@
     "ncUpdateSkipConfirmTitle": "アップデートをスキップ",
     "ncUpdateSkipConfirm": "次のリリースまでアップデート通知が非表示になります。スキップしますか？",
     "ncUpdateSkipConfirmYes": "はい、スキップする",
-    "ncUpdateSkipConfirmNo": "いいえ、通知を続ける"
+    "ncUpdateSkipConfirmNo": "いいえ、通知を続ける",
+    "ncConvertFur": "ファーを変換",
+    "ncConvertFurTooltip": "lilToonのファーマテリアルをNonToonFurに変換します。OFFの場合、ファーマテリアルは変換されず、lilToonのまま維持されます。",
+    "ncAllSelectedAreFur": "選択したマテリアルはすべてファーマテリアルで、詳細設定の「ファーを変換」がOFFになっているため、変換するものがありません。",
+    "ncConvertSkippedFur": "{0}個のファーマテリアルをスキップしました（ファーを変換がOFFのたlilToonのまま維持）。",
+    "ncTargetSkipped": "⏭ スキップ（ファー）"
 }

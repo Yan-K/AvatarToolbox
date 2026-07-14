@@ -69,7 +69,8 @@ namespace YanK
 		private static readonly PropMapping[] FurMappings =
 		{
 			new PropMapping { sourceProp = "_FurNoiseMask",       targetProp = "_FurNoiseMask",       kind = PropKind.Texture, furOnly = true },
-			new PropMapping { sourceProp = "_FurVector",          targetProp = "_FurVector",          kind = PropKind.Vector,  furOnly = true },
+			// _FurVector is handled specially in ConvertMaterial (see ApplyFurVector) — lilToon
+			// stores direction+length separately (xyz + w) while NonToon bakes both into xyz.
 			new PropMapping { sourceProp = "_FurRimColor",        targetProp = "_FurRimColor",        kind = PropKind.Color,   furOnly = true },
 			new PropMapping { sourceProp = "_FurRimFresnelPower", targetProp = "_FurRimFresnelPower", kind = PropKind.Float,   furOnly = true },
 			new PropMapping { sourceProp = "_FurRimAntiLight",    targetProp = "_FurRimAntiLight",    kind = PropKind.Float,   furOnly = true },

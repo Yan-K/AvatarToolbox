@@ -172,6 +172,10 @@ YNC Bug fix: Fix MatCap Add/Multiply detection.
 Added online update check.
 YNC Bug fix: better emission mask and matcap detection, fix drag and drop ui height.
 
+### v1.7.1 - 2026/07/14
+
+YNC Change: added Fur convert toggle.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

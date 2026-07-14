@@ -12,6 +12,9 @@ namespace YanK
 
 		private struct ConverterOptions
 		{
+			// Fur (default ON)
+			public bool ConvertFur;
+
 			// Pipeline (all default OFF)
 			public bool      CopyRenderQueue;
 			public bool      CopyStencil;
@@ -45,6 +48,7 @@ namespace YanK
 
 		// ----- EditorPrefs keys -----
 
+		private const string NC_ConvertFur         = "NC_ConvertFur";
 		private const string NC_CopyRenderQueue    = "NC_CopyRenderQueue";
 		private const string NC_CopyStencil        = "NC_CopyStencil";
 		private const string NC_CopyCull           = "NC_CopyCull";
@@ -64,6 +68,7 @@ namespace YanK
 
 		private void LoadOptions()
 		{
+			options.ConvertFur         = EditorPrefs.GetBool(NC_ConvertFur,         true);
 			options.CopyRenderQueue    = EditorPrefs.GetBool(NC_CopyRenderQueue,    false);
 			options.CopyStencil        = EditorPrefs.GetBool(NC_CopyStencil,        false);
 			options.CopyCull           = EditorPrefs.GetBool(NC_CopyCull,           false);
@@ -81,6 +86,7 @@ namespace YanK
 			customOutputFolder         = EditorPrefs.GetString(NC_OutputFolder, "");
 		}
 
+		private void SetConvertFur(bool v)         { if (options.ConvertFur == v) return; options.ConvertFur = v; EditorPrefs.SetBool(NC_ConvertFur, v); }
 		private void SetCopyRenderQueue(bool v)    { if (options.CopyRenderQueue == v) return; options.CopyRenderQueue = v; EditorPrefs.SetBool(NC_CopyRenderQueue, v); }
 		private void SetCopyStencil(bool v)        { if (options.CopyStencil == v) return; options.CopyStencil = v; EditorPrefs.SetBool(NC_CopyStencil, v); }
 		private void SetCopyCull(bool v)           { if (options.CopyCull == v) return; options.CopyCull = v; EditorPrefs.SetBool(NC_CopyCull, v); }

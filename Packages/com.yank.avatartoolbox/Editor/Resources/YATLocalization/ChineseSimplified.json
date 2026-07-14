@@ -357,5 +357,10 @@
     "ncUpdateSkipConfirmTitle": "跳过更新",
     "ncUpdateSkipConfirm": "这将隐藏更新提示，直到下一个版本发布。确定要跳过此次更新吗？",
     "ncUpdateSkipConfirmYes": "是，跳过",
-    "ncUpdateSkipConfirmNo": "否，继续提醒"
+    "ncUpdateSkipConfirmNo": "否，继续提醒",
+    "ncConvertFur": "转换毛发",
+    "ncConvertFurTooltip": "将 lilToon 毛发材质转换为 NonToonFur。关闭时毛发材质将完全不转换（保持为 lilToon）。",
+    "ncAllSelectedAreFur": "所选材质均为毛发材质，且高级设置中的“转换毛发”已关闭，没有可转换的项目。",
+    "ncConvertSkippedFur": "已跳过 {0} 个毛发材质（转换毛发已关闭，保持为 lilToon）。",
+    "ncTargetSkipped": "⏭ 已跳过（毛发）"
 }

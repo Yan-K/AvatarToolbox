@@ -357,5 +357,10 @@
     "ncUpdateSkipConfirmTitle": "업데이트 건너뛰기",
     "ncUpdateSkipConfirm": "다음 릴리스까지 업데이트 알림이 숨겨집니다. 이번 업데이트를 건너뛰시겠습니까?",
     "ncUpdateSkipConfirmYes": "예, 건너뛰기",
-    "ncUpdateSkipConfirmNo": "아니요, 계속 알림"
+    "ncUpdateSkipConfirmNo": "아니요, 계속 알림",
+    "ncConvertFur": "퍼(Fur) 변환",
+    "ncConvertFurTooltip": "lilToon 퍼 머티리얼을 NonToonFur로 변환합니다. 꺼져 있으면 퍼 머티리얼은 전혀 변환되지 않고 lilToon 상태로 유지됩니다.",
+    "ncAllSelectedAreFur": "선택한 모든 머티리얼이 퍼 머티리얼이며, 고급 설정의 '퍼 변환'이 꺼져 있어 변환할 항목이 없습니다.",
+    "ncConvertSkippedFur": "퍼 머티리얼 {0}개를 건너똔습니다 (퍼 변환이 꺼져 있어 lilToon 상태로 유지됨).",
+    "ncTargetSkipped": "⏭ 건너뜀 (퍼)"
 }

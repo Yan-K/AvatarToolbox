@@ -357,5 +357,10 @@
     "ncUpdateSkipConfirmTitle": "略過更新",
     "ncUpdateSkipConfirm": "這將隱藏更新提示，直到下一個版本發布。確定要略過此次更新嗎？",
     "ncUpdateSkipConfirmYes": "是，略過",
-    "ncUpdateSkipConfirmNo": "否，繼續提醒"
+    "ncUpdateSkipConfirmNo": "否，繼續提醒",
+    "ncConvertFur": "轉換毛絨",
+    "ncConvertFurTooltip": "將 lilToon 毛絨材質轉換為 NonToonFur。關閉時毛絨材質將完全不轉換（保持為 lilToon）。",
+    "ncAllSelectedAreFur": "所選材質皆為毛絨材質，且進階設定中的「轉換毛絨」已關閉，沒有可轉換的項目。",
+    "ncConvertSkippedFur": "已略過 {0} 個毛絨材質（轉換毛絨已關閉，保持為 lilToon）。",
+    "ncTargetSkipped": "⏭ 已略過（毛絨）"
 }

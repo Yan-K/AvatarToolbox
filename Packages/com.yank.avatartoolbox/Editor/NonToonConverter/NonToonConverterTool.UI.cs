@@ -119,6 +119,9 @@ namespace YanK
 					// -- Left column: pipeline copy --
 					EditorGUILayout.BeginVertical(GUILayout.Width(colW));
 					EditorGUILayout.LabelField(L("ncPipelineCopy", "Pipeline Copy"), EditorStyles.boldLabel);
+					DrawAdvancedToggle("ncConvertFur", "Convert Fur",
+						"Convert lilToon Fur materials to NonToonFur. OFF leaves Fur materials completely unconverted (they stay lilToon).",
+						options.ConvertFur, SetConvertFur);
 					DrawAdvancedToggle("ncCopyRenderQueue", "Copy Render Queue",
 						"Copy renderQueue verbatim. OFF = mode-derived queue (Opaque=-1, Cutout=2450, Transparent=3000)",
 						options.CopyRenderQueue, SetCopyRenderQueue);
@@ -351,7 +354,9 @@ namespace YanK
 			bool newSel = EditorGUILayout.Toggle(slot.selected, GUILayout.Width(20));
 			if (newSel != slot.selected) { slot.selected = newSel; UpdateSelectAll(); }
 			EditorGUILayout.ObjectField(slot.material, typeof(Material), false, GUILayout.ExpandWidth(true));
-			string targetLabel = IsFurMaterial(slot.material) ? "→ NonToonFur" : "→ NonToon";
+			bool   isFurMat      = IsFurMaterial(slot.material);
+			bool   willBeSkipped = isFurMat && !options.ConvertFur;
+			string targetLabel   = willBeSkipped ? L("ncTargetSkipped", "⏭ Skipped (Fur)") : (isFurMat ? "→ NonToonFur" : "→ NonToon");
 			EditorGUILayout.LabelField(targetLabel, dimLabelStyle, GUILayout.Width(100));
 			EditorGUILayout.EndHorizontal();
 

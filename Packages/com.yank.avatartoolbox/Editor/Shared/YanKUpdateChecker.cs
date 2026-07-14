@@ -23,6 +23,9 @@ namespace YanK
 		private const string PrefSkippedVersion = "YAT_SkippedUpdateVersion";
 
 		private static readonly TimeSpan CheckInterval = TimeSpan.FromHours(6);
+		// Minimum gap between window-open-triggered checks, purely to avoid firing duplicate
+		// near-simultaneous requests when several Yan-K windows open together (saved layout, etc.).
+		private static readonly TimeSpan WindowOpenDebounce = TimeSpan.FromSeconds(10);
 
 		public enum CheckState { Idle, Checking, Done, Offline, Failed }
 
@@ -77,6 +80,42 @@ namespace YanK
 			}
 
 			// User explicitly asked: if offline, don't attempt the check at all.
+			if (Application.internetReachability == NetworkReachability.NotReachable)
+			{
+				State = CheckState.Offline;
+				return;
+			}
+
+			StartCheck();
+		}
+
+		/// <summary>
+		/// Call once from a tool window's OnEnable (window opened, reopened, or restored after a
+		/// domain reload). Forces a fresh check regardless of the 6h throttle used by
+		/// <see cref="EnsureChecked"/> — reopening a Yan-K tool should always reflect the latest
+		/// release — while still avoiding duplicate concurrent requests and respecting the offline
+		/// check. A short debounce prevents redundant requests when multiple Yan-K windows open
+		/// back-to-back (e.g. a saved Editor layout).
+		/// </summary>
+		public static void CheckOnWindowOpen()
+		{
+			// Surface a cached result immediately so the button can show without waiting on network.
+			if (string.IsNullOrEmpty(_latestVersion))
+			{
+				string cached = EditorPrefs.GetString(PrefCachedLatest, "");
+				if (!string.IsNullOrEmpty(cached)) _latestVersion = cached;
+			}
+
+			// Stop the per-OnGUI EnsureChecked() from also firing right after this.
+			_requestedThisSession = true;
+
+			if (State == CheckState.Checking) return; // a check is already in flight
+
+			long lastTicks = 0;
+			long.TryParse(EditorPrefs.GetString(PrefLastCheckTicks, "0"), out lastTicks);
+			if (lastTicks != 0 && DateTime.UtcNow - new DateTime(lastTicks, DateTimeKind.Utc) < WindowOpenDebounce)
+				return;
+
 			if (Application.internetReachability == NetworkReachability.NotReachable)
 			{
 				State = CheckState.Offline;
