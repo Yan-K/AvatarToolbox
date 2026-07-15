@@ -25,6 +25,7 @@ namespace YanK
 
 			// Bake (all default ON)
 			public bool BakeMainTex;
+			public bool BakeAlphaMask;
 			public bool BakeShadow;
 			public bool BakeEmission;
 			public bool BakeNormalMap;
@@ -59,6 +60,7 @@ namespace YanK
 		private const string NC_OutputMode         = "NC_OutputMode";
 		private const string NC_OutputFolder       = "NC_OutputFolder";
 		private const string NC_BakeMainTex        = "NC_BakeMainTex";
+		private const string NC_BakeAlphaMask      = "NC_BakeAlphaMask";
 		private const string NC_BakeShadow         = "NC_BakeShadow";
 		private const string NC_BakeEmission       = "NC_BakeEmission";
 		private const string NC_BakeNormalMap      = "NC_BakeNormalMap";
@@ -76,6 +78,7 @@ namespace YanK
 			options.CopyBlend          = EditorPrefs.GetBool(NC_CopyBlend,          false);
 			options.ForceRenderingMode = (ForceMode)EditorPrefs.GetInt(NC_ForceRenderingMode, 0);
 			options.BakeMainTex        = EditorPrefs.GetBool(NC_BakeMainTex,        true);
+			options.BakeAlphaMask      = EditorPrefs.GetBool(NC_BakeAlphaMask,      true);
 			options.BakeShadow         = EditorPrefs.GetBool(NC_BakeShadow,         false);
 			options.BakeEmission       = EditorPrefs.GetBool(NC_BakeEmission,       true);
 			options.BakeNormalMap      = EditorPrefs.GetBool(NC_BakeNormalMap,      true);
@@ -97,6 +100,7 @@ namespace YanK
 		private void SetOutputMode(OutputMode v)   { if (outputMode == v) return; outputMode = v; EditorPrefs.SetInt(NC_OutputMode, (int)v); }
 		private void SetCustomOutputFolder(string v) { if (customOutputFolder == v) return; customOutputFolder = v; EditorPrefs.SetString(NC_OutputFolder, v); }
 		private void SetBakeMainTex(bool v)        { if (options.BakeMainTex == v) return; options.BakeMainTex = v; EditorPrefs.SetBool(NC_BakeMainTex, v); }
+		private void SetBakeAlphaMask(bool v)      { if (options.BakeAlphaMask == v) return; options.BakeAlphaMask = v; EditorPrefs.SetBool(NC_BakeAlphaMask, v); }
 		private void SetBakeShadow(bool v)         { if (options.BakeShadow == v) return; options.BakeShadow = v; EditorPrefs.SetBool(NC_BakeShadow, v); }
 		private void SetBakeEmission(bool v)       { if (options.BakeEmission == v) return; options.BakeEmission = v; EditorPrefs.SetBool(NC_BakeEmission, v); }
 		private void SetBakeNormalMap(bool v)      { if (options.BakeNormalMap == v) return; options.BakeNormalMap = v; EditorPrefs.SetBool(NC_BakeNormalMap, v); }

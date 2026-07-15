@@ -147,6 +147,9 @@ namespace YanK
 					DrawAdvancedToggle("ncBakeMainTex",   "Bake Main Texture",
 						"Composite Color + HSVG + 2nd/3rd layers into a single texture using lilToon's baker",
 						options.BakeMainTex,   SetBakeMainTex);
+					DrawAdvancedToggle("ncBakeAlphaMask", "Bake Alpha Mask",
+						"Bake an enabled lilToon alpha mask into the base texture's alpha channel",
+						options.BakeAlphaMask, SetBakeAlphaMask);
 					DrawAdvancedToggle("ncBakeEmission",  "Bake Emission (grayscale)",
 						"Port emission to NonToon Lighten. Color information is lost — grayscale only.",
 						options.BakeEmission,  SetBakeEmission);
@@ -163,7 +166,7 @@ namespace YanK
 
 					EditorGUILayout.EndHorizontal();
 
-					bool anyBake = options.BakeMainTex || options.BakeShadow ||
+					bool anyBake = options.BakeMainTex || options.BakeAlphaMask || options.BakeShadow ||
 					               options.BakeEmission || options.BakeNormalMap || options.BakeMasks;
 					if (anyBake)
 					{

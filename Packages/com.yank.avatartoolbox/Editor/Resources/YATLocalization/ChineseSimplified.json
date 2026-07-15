@@ -335,6 +335,8 @@
     "ncBakeOptions": "贴图烘焙",
     "ncBakeMainTex": "烘焙主贴图",
     "ncBakeMainTexTooltip": "使用 lilToon 烘焙器合成 Color+HSVG+第二/三层",
+    "ncBakeAlphaMask": "烘焙透明遮罩",
+    "ncBakeAlphaMaskTooltip": "将已启用的 lilToon 透明遮罩烘焙至基础贴图的 Alpha 通道",
     "ncBakeShadow": "烘焙阴影渐变",
     "ncBakeShadowTooltip": "从阴影色构建 SharedGradients Texture2DArray 渐变",
     "ncBakeEmission": "烘焙自发光（灰度）",

@@ -335,6 +335,8 @@
     "ncBakeOptions": "Texture Baking",
     "ncBakeMainTex": "Bake Main Texture",
     "ncBakeMainTexTooltip": "Composite Color + HSVG + 2nd/3rd layers using lilToon's baker",
+    "ncBakeAlphaMask": "Bake Alpha Mask",
+    "ncBakeAlphaMaskTooltip": "Bake an enabled lilToon alpha mask into the base texture's alpha channel",
     "ncBakeShadow": "Bake Shadow Gradient",
     "ncBakeShadowTooltip": "Build SharedGradients Texture2DArray ramp from lilToon shadow color",
     "ncBakeEmission": "Bake Emission (grayscale)",

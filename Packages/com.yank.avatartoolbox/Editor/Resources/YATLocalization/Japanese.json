@@ -335,6 +335,8 @@
     "ncBakeOptions": "テクスチャベーク",
     "ncBakeMainTex": "メインテクスチャをベーク",
     "ncBakeMainTexTooltip": "lilToonのベーカーでColor+HSVG+2枚目/3枚目を合成",
+    "ncBakeAlphaMask": "アルファマスクをベーク",
+    "ncBakeAlphaMaskTooltip": "有効なlilToonアルファマスクをベーステクスチャのアルファチャンネルにベーク",
     "ncBakeShadow": "シャドウグラデーションをベーク",
     "ncBakeShadowTooltip": "シャドウカラーからSharedGradients Texture2DArrayを構築",
     "ncBakeEmission": "エミッションをベーク（グレースケール）",

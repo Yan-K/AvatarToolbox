@@ -335,6 +335,8 @@
     "ncBakeOptions": "텍스처 베이크",
     "ncBakeMainTex": "메인 텍스처 베이크",
     "ncBakeMainTexTooltip": "lilToon 베이커로 Color+HSVG+2nd/3rd 합성",
+    "ncBakeAlphaMask": "알파 마스크 베이크",
+    "ncBakeAlphaMaskTooltip": "활성화된 lilToon 알파 마스크를 기본 텍스처의 알파 채널에 베이크",
     "ncBakeShadow": "그림자 그라디언트 베이크",
     "ncBakeShadowTooltip": "그림자 색상에서 SharedGradients Texture2DArray 램프 구성",
     "ncBakeEmission": "이미션 베이크 (회색조)",

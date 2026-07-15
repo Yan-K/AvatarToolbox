@@ -155,9 +155,9 @@ namespace YanK
 		                              string folder, string baseName, List<MaskCandidate> resolvedMasks)
 		{
 			// --- Main texture bake (folds in _Color tint + tiling + 2nd/3rd layers) ---
-			if (opt.BakeMainTex)
+			if (opt.BakeMainTex || opt.BakeAlphaMask)
 			{
-				var bakedMain = BakeMainTexture(src, folder, baseName);
+				var bakedMain = BakeMainTexture(src, folder, baseName, opt.BakeMainTex, opt.BakeAlphaMask);
 				if (bakedMain != null && dst.HasProperty("_BaseTexture"))
 					dst.SetTexture("_BaseTexture", bakedMain);
 			}
@@ -207,7 +207,8 @@ namespace YanK
 		// Main texture bake (reuses lilToon's Hidden/ltsother_baker)
 		// =====================================================================
 
-		private static Texture2D BakeMainTexture(Material src, string folder, string baseName)
+		private static Texture2D BakeMainTexture(Material src, string folder, string baseName,
+		                                                bool bakeMainTexture, bool bakeAlphaMask)
 		{
 			var srcMain = src.HasProperty("_MainTex") ? src.GetTexture("_MainTex") as Texture2D : null;
 			// No base texture → solid-color path handles it.
@@ -215,7 +216,7 @@ namespace YanK
 
 			bool hasColor  = src.HasProperty("_Color")  && src.GetColor("_Color") != Color.white;
 			bool hasHSVG   = src.HasProperty("_MainTexHSVG") &&
-			                 src.GetVector("_MainTexHSVG") != new Vector4(0f, 0f, 1f, 1f);
+			                 src.GetVector("_MainTexHSVG") != new Vector4(0f, 1f, 1f, 1f);
 			bool has2nd    = IsFeatureActive(src, "_UseMain2ndTex");
 			bool has3rd    = IsFeatureActive(src, "_UseMain3rdTex");
 			bool hasGrad   = src.HasProperty("_MainGradationStrength") && src.GetFloat("_MainGradationStrength") > 0f;
@@ -225,9 +226,11 @@ namespace YanK
 			                 : new Vector4(1, 1, 0, 0);
 			bool hasTiling = !(Mathf.Approximately(mainST.x, 1f) && Mathf.Approximately(mainST.y, 1f) &&
 			                   Mathf.Approximately(mainST.z, 0f) && Mathf.Approximately(mainST.w, 0f));
+			bool shouldBakeMain  = bakeMainTexture && (hasColor || hasHSVG || has2nd || has3rd || hasGrad || hasTiling);
+			bool shouldBakeAlpha = bakeAlphaMask && ShouldBakeAlphaMask(src);
 
 			// Nothing to composite → keep the original texture mapping.
-			if (!hasColor && !hasHSVG && !has2nd && !has3rd && !hasGrad && !hasTiling)
+			if (!shouldBakeMain && !shouldBakeAlpha)
 				return null;
 
 			var bakerShader = Shader.Find("Hidden/ltsother_baker");
@@ -237,35 +240,97 @@ namespace YanK
 				return null;
 			}
 
-			var bakerMat  = new Material(bakerShader);
-			var mainFull  = LoadFullResReadable(srcMain);
+			var bakerMat = new Material(bakerShader);
+			var mainFull = LoadFullResReadable(srcMain);
+			Texture2D alphaMaskFull = null;
+			Texture2D workingTex = mainFull;
+			Texture2D generatedTex = null;
 			try
 			{
-				bakerMat.SetColor("_Color", hasColor ? src.GetColor("_Color") : Color.white);
-				if (src.HasProperty("_MainTexHSVG"))           bakerMat.SetVector("_MainTexHSVG",           src.GetVector("_MainTexHSVG"));
-				if (src.HasProperty("_MainGradationStrength")) bakerMat.SetFloat("_MainGradationStrength",  src.GetFloat("_MainGradationStrength"));
-				if (src.HasProperty("_MainGradationTex"))      bakerMat.SetTexture("_MainGradationTex",     src.GetTexture("_MainGradationTex"));
-				if (src.HasProperty("_MainColorAdjustMask"))   bakerMat.SetTexture("_MainColorAdjustMask",  src.GetTexture("_MainColorAdjustMask"));
+				if (shouldBakeMain)
+				{
+					bakerMat.SetColor("_Color", hasColor ? src.GetColor("_Color") : Color.white);
+					if (src.HasProperty("_MainTexHSVG"))           bakerMat.SetVector("_MainTexHSVG",           src.GetVector("_MainTexHSVG"));
+					if (src.HasProperty("_MainGradationStrength")) bakerMat.SetFloat("_MainGradationStrength",  src.GetFloat("_MainGradationStrength"));
+					if (src.HasProperty("_MainGradationTex"))      bakerMat.SetTexture("_MainGradationTex",     src.GetTexture("_MainGradationTex"));
+					if (src.HasProperty("_MainColorAdjustMask"))   bakerMat.SetTexture("_MainColorAdjustMask",  src.GetTexture("_MainColorAdjustMask"));
 
-				bakerMat.SetTexture("_MainTex", mainFull);
-				// Base tiling/offset — baker honors _MainTex_ST via LIL_GET_SUBTEX.
-				bakerMat.SetTextureScale("_MainTex",  new Vector2(mainST.x, mainST.y));
-				bakerMat.SetTextureOffset("_MainTex", new Vector2(mainST.z, mainST.w));
+					bakerMat.SetTexture("_MainTex", mainFull);
+					// Base tiling/offset — baker honors _MainTex_ST via LIL_GET_SUBTEX.
+					bakerMat.SetTextureScale("_MainTex",  new Vector2(mainST.x, mainST.y));
+					bakerMat.SetTextureOffset("_MainTex", new Vector2(mainST.z, mainST.w));
 
-				if (has2nd) CopyMain2ndToBaker(src, bakerMat);
-				if (has3rd) CopyMain3rdToBaker(src, bakerMat);
+					if (has2nd) CopyMain2ndToBaker(src, bakerMat);
+					if (has3rd) CopyMain3rdToBaker(src, bakerMat);
 
-				int w = mainFull.width, h = mainFull.height;
-				Texture2D outTex = RunBlit(bakerMat, mainFull, w, h, false);
-				var saved = SaveTexturePng(outTex, folder, baseName + "_NTBake");
-				if (saved != null) CopyImportSettings(srcMain, saved, asNormal: false);
+					generatedTex = RunBlit(bakerMat, mainFull, mainFull.width, mainFull.height, false);
+					workingTex = generatedTex;
+				}
+
+				if (shouldBakeAlpha)
+				{
+					// lilToon's alpha-mask baker is a separate keyword path. Run it after the
+					// main pass so Color/HSVG/2nd/3rd compositing is retained.
+					bakerMat.EnableKeyword("_ALPHAMASK");
+					bakerMat.SetTexture("_MainTex", workingTex);
+					bakerMat.SetTextureScale("_MainTex", Vector2.one);
+					bakerMat.SetTextureOffset("_MainTex", Vector2.zero);
+					bakerMat.SetInteger("_AlphaMaskMode", Mathf.RoundToInt(src.GetFloat("_AlphaMaskMode")));
+					bakerMat.SetFloat("_AlphaMaskScale", src.HasProperty("_AlphaMaskScale") ? src.GetFloat("_AlphaMaskScale") : 1f);
+					bakerMat.SetFloat("_AlphaMaskValue", src.HasProperty("_AlphaMaskValue") ? src.GetFloat("_AlphaMaskValue") : 0f);
+
+					var alphaMask = src.GetTexture("_AlphaMask");
+					if (alphaMask is Texture2D alphaMask2D)
+					{
+						alphaMaskFull = LoadFullResReadable(alphaMask2D);
+						alphaMask = alphaMaskFull;
+					}
+					bakerMat.SetTexture("_AlphaMask", alphaMask);
+
+					var alphaBaked = RunBlit(bakerMat, workingTex, mainFull.width, mainFull.height, false);
+					if (generatedTex != null) Object.DestroyImmediate(generatedTex);
+					generatedTex = alphaBaked;
+					workingTex = generatedTex;
+				}
+
+				var saved = SaveTexturePng(workingTex, folder, baseName + "_NTBake");
+				if (saved != null)
+					CopyImportSettings(srcMain, saved, asNormal: false, alphaIsTransparency: shouldBakeAlpha);
 				return saved;
 			}
 			finally
 			{
 				Object.DestroyImmediate(bakerMat);
+				if (generatedTex != null) Object.DestroyImmediate(generatedTex);
+				if (alphaMaskFull != null && alphaMaskFull != src.GetTexture("_AlphaMask")) Object.DestroyImmediate(alphaMaskFull);
 				if (mainFull != null && mainFull != srcMain) Object.DestroyImmediate(mainFull);
 			}
+		}
+
+		/// <summary>
+		/// Mirrors lilToon's alpha-mask controls. The editor exposes an effective Transparency
+		/// value in [-1, 1]; either endpoint (and an extreme cutoff) produces a uniform result,
+		/// so there is no useful mask detail to fold into the texture.
+		/// </summary>
+		private static bool ShouldBakeAlphaMask(Material src)
+		{
+			if (src == null || !src.HasProperty("_AlphaMaskMode") ||
+			    Mathf.RoundToInt(src.GetFloat("_AlphaMaskMode")) == 0 ||
+			    !src.HasProperty("_AlphaMask") || src.GetTexture("_AlphaMask") == null)
+				return false;
+
+			float scale = src.HasProperty("_AlphaMaskScale") ? src.GetFloat("_AlphaMaskScale") : 1f;
+			float value = src.HasProperty("_AlphaMaskValue") ? src.GetFloat("_AlphaMaskValue") : 0f;
+			float transparency = value - (scale < 0f ? 1f : 0f);
+			if (transparency <= -1f || transparency >= 1f) return false;
+
+			if (src.HasProperty("_Cutoff"))
+			{
+				float cutoff = src.GetFloat("_Cutoff");
+				if (cutoff <= -1f || cutoff >= 1f) return false;
+			}
+
+			return true;
 		}
 
 		private static void CopyMain2ndToBaker(Material src, Material dst)
@@ -611,7 +676,8 @@ namespace YanK
 		/// source texture onto a freshly-baked asset, so the baked texture keeps the source's size and
 		/// compression instead of Unity's defaults. Mirrors lilToon's CopyTextureSetting.
 		/// </summary>
-		private static void CopyImportSettings(Texture2D from, Texture2D toAsset, bool asNormal)
+		private static void CopyImportSettings(Texture2D from, Texture2D toAsset, bool asNormal,
+		                                       bool alphaIsTransparency = false)
 		{
 			string toPath = AssetDatabase.GetAssetPath(toAsset);
 			if (!(AssetImporter.GetAtPath(toPath) is TextureImporter toImp)) return;
@@ -625,6 +691,11 @@ namespace YanK
 				toImp.SetPlatformTextureSettings(fromImp.GetDefaultPlatformTextureSettings());
 			}
 			if (asNormal) toImp.textureType = TextureImporterType.NormalMap;
+			if (alphaIsTransparency)
+			{
+				toImp.alphaSource = TextureImporterAlphaSource.FromInput;
+				toImp.alphaIsTransparency = true;
+			}
 			toImp.SaveAndReimport();
 		}
 
