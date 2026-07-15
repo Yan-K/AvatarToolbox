@@ -275,7 +275,9 @@ namespace YanK
 					bakerMat.SetTexture("_MainTex", workingTex);
 					bakerMat.SetTextureScale("_MainTex", Vector2.one);
 					bakerMat.SetTextureOffset("_MainTex", Vector2.zero);
-					bakerMat.SetInteger("_AlphaMaskMode", Mathf.RoundToInt(src.GetFloat("_AlphaMaskMode")));
+					// Match lilToon's AutoBakeAlphaMask: the hidden baker keeps this Int-declared
+					// property in its float property sheet, so SetInteger logs a type collision.
+					bakerMat.SetFloat("_AlphaMaskMode", src.GetFloat("_AlphaMaskMode"));
 					bakerMat.SetFloat("_AlphaMaskScale", src.HasProperty("_AlphaMaskScale") ? src.GetFloat("_AlphaMaskScale") : 1f);
 					bakerMat.SetFloat("_AlphaMaskValue", src.HasProperty("_AlphaMaskValue") ? src.GetFloat("_AlphaMaskValue") : 0f);
 
