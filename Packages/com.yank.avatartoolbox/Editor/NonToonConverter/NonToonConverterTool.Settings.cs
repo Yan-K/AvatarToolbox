@@ -23,7 +23,7 @@ namespace YanK
 			public bool      CopyBlend;
 			public ForceMode ForceRenderingMode;
 
-			// Bake (all default ON)
+			// Bake (default ON except editable shadow-gradient generation)
 			public bool BakeMainTex;
 			public bool BakeAlphaMask;
 			public bool BakeShadow;

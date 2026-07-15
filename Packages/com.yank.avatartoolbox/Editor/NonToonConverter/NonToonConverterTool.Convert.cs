@@ -62,6 +62,10 @@ namespace YanK
 				return;
 			}
 
+			// Create a missing custom Assets folder through AssetDatabase so every folder gets
+			// its GUID/.meta synchronously before material and editable Shader Core assets are made.
+			if (!EnsureCustomOutputFolder()) return;
+
 			// Pre-flight: offer to remove any lilToon Fake Shadow slots (they cause artifacts)
 			if (fakeShadowSlots.Count > 0)
 			{
@@ -75,7 +79,7 @@ namespace YanK
 			}
 
 			// Pre-resolve mask overflow BEFORE StartAssetEditing (needs dialogs)
-			var maskChoices = options.BakeMasks
+			var maskChoices = options.BakeMasks || options.BakeEmission
 				? PreResolveMaskOverflow(toConvert, options)
 				: new Dictionary<Material, List<MaskCandidate>>();
 
@@ -229,6 +233,10 @@ namespace YanK
 
 			// 7. Save asset first (baking writes additional assets into same folder)
 			AssetDatabase.CreateAsset(dst, dstPath);
+			string persistedPath = AssetDatabase.GetAssetPath(dst).Replace('\\', '/');
+			string materialGuid = AssetDatabase.AssetPathToGUID(dstPath, AssetPathToGUIDOptions.OnlyExistingAssets);
+			if (!persistedPath.Equals(dstPath, System.StringComparison.OrdinalIgnoreCase) || string.IsNullOrEmpty(materialGuid))
+				throw new IOException($"Unity did not create a persistent material asset at '{dstPath}'.");
 			Undo.RegisterCreatedObjectUndo(dst, "Create NonToon Material");
 
 			// Override render queue after save if requested
@@ -371,10 +379,118 @@ namespace YanK
 		private string ResolveOutputFolder(string srcAssetPath)
 		{
 			if (outputMode == OutputMode.Custom && !string.IsNullOrEmpty(customOutputFolder))
-				return customOutputFolder;
+				return NormalizeAssetFolder(customOutputFolder);
 			if (!string.IsNullOrEmpty(srcAssetPath))
 				return Path.GetDirectoryName(srcAssetPath).Replace('\\', '/');
 			return "Assets";
+		}
+
+		private bool EnsureCustomOutputFolder()
+		{
+			if (outputMode != OutputMode.Custom) return true;
+			if (string.IsNullOrWhiteSpace(customOutputFolder))
+			{
+				EditorUtility.DisplayDialog(
+					L("ncOutputFolderErrorTitle", "Invalid Output Folder"),
+					L("ncOutputFolderInvalidPath", "Enter a custom output folder inside Assets."),
+					"OK");
+				return false;
+			}
+
+			string folder = NormalizeAssetFolder(customOutputFolder);
+			if (string.IsNullOrEmpty(folder) ||
+			    !(folder.Equals("Assets", System.StringComparison.OrdinalIgnoreCase) ||
+			      folder.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase)))
+			{
+				EditorUtility.DisplayDialog(
+					L("ncOutputFolderErrorTitle", "Invalid Output Folder"),
+					L("ncOutputFolderMustBeAssets", "The custom output folder must be inside this project's Assets folder."),
+					"OK");
+				return false;
+			}
+			if (folder.Equals("Assets/StreamingAssets", System.StringComparison.OrdinalIgnoreCase) ||
+			    folder.StartsWith("Assets/StreamingAssets/", System.StringComparison.OrdinalIgnoreCase))
+			{
+				EditorUtility.DisplayDialog(
+					L("ncOutputFolderErrorTitle", "Invalid Output Folder"),
+					L("ncOutputFolderStreamingAssets", "Unity cannot create material assets inside StreamingAssets. Choose another Assets folder."),
+					"OK");
+				return false;
+			}
+
+			var segments = folder.Split('/');
+			if (segments.Any(s => s == "." || s == ".." || string.IsNullOrWhiteSpace(s)))
+			{
+				EditorUtility.DisplayDialog(
+					L("ncOutputFolderErrorTitle", "Invalid Output Folder"),
+					L("ncOutputFolderInvalidPath", "The custom output folder contains an invalid path segment."),
+					"OK");
+				return false;
+			}
+
+			string current = "Assets";
+			for (int i = 1; i < segments.Length; i++)
+			{
+				string next = current + "/" + segments[i];
+				if (!AssetDatabase.IsValidFolder(next) && Directory.Exists(next))
+					AssetDatabase.Refresh(ImportAssetOptions.ForceSynchronousImport);
+
+				if (!AssetDatabase.IsValidFolder(next))
+				{
+					if (!string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(next, AssetPathToGUIDOptions.OnlyExistingAssets)))
+					{
+						EditorUtility.DisplayDialog(
+							L("ncOutputFolderErrorTitle", "Invalid Output Folder"),
+							string.Format(L("ncOutputFolderFileCollision", "A file already occupies part of the requested output path:\n{0}"), next),
+							"OK");
+						return false;
+					}
+
+					string guid = AssetDatabase.CreateFolder(current, segments[i]);
+					string createdPath = string.IsNullOrEmpty(guid) ? "" : AssetDatabase.GUIDToAssetPath(guid);
+					if (string.IsNullOrEmpty(guid) || !createdPath.Equals(next, System.StringComparison.OrdinalIgnoreCase))
+					{
+						EditorUtility.DisplayDialog(
+							L("ncOutputFolderErrorTitle", "Invalid Output Folder"),
+							string.Format(L("ncOutputFolderCreateFailed", "Could not create output folder:\n{0}"), next),
+							"OK");
+						return false;
+					}
+				}
+
+				current = next;
+			}
+
+			if (!AssetDatabase.IsValidFolder(folder))
+			{
+				EditorUtility.DisplayDialog(
+					L("ncOutputFolderErrorTitle", "Invalid Output Folder"),
+					string.Format(L("ncOutputFolderCreateFailed", "Could not create output folder:\n{0}"), folder),
+					"OK");
+				return false;
+			}
+
+			if (customOutputFolder != folder) SetCustomOutputFolder(folder);
+			return true;
+		}
+
+		private static string NormalizeAssetFolder(string folder)
+		{
+			if (string.IsNullOrWhiteSpace(folder)) return "";
+
+			string normalized = folder.Trim().Replace('\\', '/').TrimEnd('/');
+			while (normalized.Contains("//")) normalized = normalized.Replace("//", "/");
+
+			string assetsFullPath = Application.dataPath.Replace('\\', '/').TrimEnd('/');
+			if (normalized.Equals(assetsFullPath, System.StringComparison.OrdinalIgnoreCase))
+				return "Assets";
+			if (normalized.StartsWith(assetsFullPath + "/", System.StringComparison.OrdinalIgnoreCase))
+				normalized = "Assets" + normalized.Substring(assetsFullPath.Length);
+
+			if (normalized.Equals("Assets", System.StringComparison.OrdinalIgnoreCase)) return "Assets";
+			if (normalized.StartsWith("Assets/", System.StringComparison.OrdinalIgnoreCase))
+				return "Assets/" + normalized.Substring("Assets/".Length);
+			return normalized;
 		}
 
 		// =====================================================================

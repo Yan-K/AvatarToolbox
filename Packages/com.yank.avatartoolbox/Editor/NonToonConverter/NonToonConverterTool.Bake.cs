@@ -18,7 +18,23 @@ namespace YanK
 			public string  maskChannelProp; // final prefixed NonToon property name
 			public bool    isEmission;      // emission = never dropped
 			public Texture srcMask;         // source mask texture (may be null → white)
+			public string  srcMaskProperty; // lilToon texture property (for UV/ST preservation)
 		}
+
+		private class EditableMaskChannel
+		{
+			public Texture2D texture;
+			public int       mode;          // Shader Core ChannelMode enum index
+			public Vector4   blend;
+			public float     fallbackValue = 1f;
+		}
+
+		private const int ShaderCoreMaskModeR         = 0;
+		private const int ShaderCoreMaskModeLuminance = 9;
+		private const int ShaderCoreMaskModeCustom    = 10;
+		// LightBoost is an absolute light-color floor, not an additive/multiplicative amount.
+		// A low neutral-light baseline avoids the severe over-brightening caused by adding 1.0.
+		private const float NonToonEmissionLightBaseline = 0.125f;
 
 		// =====================================================================
 		// Pre-pass: resolve mask overflow (called outside StartAssetEditing)
@@ -74,15 +90,22 @@ namespace YanK
 
 		private static bool HasEmissionAlpha(Material src)
 		{
-			// No _EmissionColor property → no alpha-as-strength semantics; treat as active.
+			// lilToon's effective emission strength includes HDR color, color alpha and the
+			// separate _EmissionBlend slider. Skip only when that combined energy is negligible.
 			if (!src.HasProperty("_EmissionColor")) return true;
-			return src.GetColor("_EmissionColor").a > EmissionAlphaThreshold;
+			Color color = src.GetColor("_EmissionColor");
+			float luminance = 0.2126729f * Mathf.Max(0f, color.r) +
+			                  0.7151522f * Mathf.Max(0f, color.g) +
+			                  0.0721750f * Mathf.Max(0f, color.b);
+			bool standardEmission = src.HasProperty("_EmissionBlend");
+			float alpha = standardEmission ? Mathf.Max(0f, color.a) : 1f; // lilToon Lite ignores emission alpha.
+			float blend = standardEmission ? Mathf.Clamp01(src.GetFloat("_EmissionBlend")) : 1f;
+			return luminance * alpha * blend > EmissionAlphaThreshold;
 		}
 
 		private static List<MaskCandidate> CollectMaskCandidates(Material src, ConverterOptions opt)
 		{
 			var list = new List<MaskCandidate>();
-			if (!opt.BakeMasks) return list;
 
 			// 1. Emission mask — PRIORITY (gated on alpha: lilToon _EmissionColor.a is the emission
 			//    strength; near-zero alpha means emission is effectively off, so don't port it).
@@ -94,8 +117,13 @@ namespace YanK
 					maskChannelProp = P_Lighten + "LightBoostMaskChannel",
 					isEmission      = true,
 					srcMask         = src.HasProperty("_EmissionBlendMask") ? src.GetTexture("_EmissionBlendMask") : null,
+					srcMaskProperty = "_EmissionBlendMask",
 				});
 			}
+
+			// Emission needs a SharedMask channel too, but it is controlled by its own option.
+			// Turning general mask conversion off should not silently disable emission conversion.
+			if (!opt.BakeMasks) return list;
 
 			// 2 & 3. MatCap blend masks — routed to whichever NonToon slot (Multiply/Add) the matcap
 			// itself was routed to (see DecideMatCapRouting); the 2nd matcap's mask is skipped when
@@ -108,6 +136,7 @@ namespace YanK
 					featureName     = mcMul1 ? "MatCap Multiply Mask" : "MatCap Add Mask",
 					maskChannelProp = P_MatCaps + (mcMul1 ? "MatCapMultiplyMaskChannel" : "MatCapAddMaskChannel"),
 					srcMask         = src.GetTexture("_MatCapBlendMask"),
+					srcMaskProperty = "_MatCapBlendMask",
 				});
 			}
 			if (mcUse2 && HasNonNullTex(src, "_MatCap2ndBlendMask"))
@@ -117,6 +146,7 @@ namespace YanK
 					featureName     = mcMul2 ? "MatCap Multiply Mask" : "MatCap Add Mask",
 					maskChannelProp = P_MatCaps + (mcMul2 ? "MatCapMultiplyMaskChannel" : "MatCapAddMaskChannel"),
 					srcMask         = src.GetTexture("_MatCap2ndBlendMask"),
+					srcMaskProperty = "_MatCap2ndBlendMask",
 				});
 			}
 
@@ -128,6 +158,7 @@ namespace YanK
 					featureName     = "RimLight Mask",
 					maskChannelProp = P_RimLight + "RimLightMaskChannel",
 					srcMask         = src.GetTexture("_RimColorTex"),
+					srcMaskProperty = "_RimColorTex",
 				});
 			}
 
@@ -139,6 +170,7 @@ namespace YanK
 					featureName     = "Outline Width Mask",
 					maskChannelProp = null, // NonToon has no per-pixel outline width — stored for info
 					srcMask         = src.GetTexture("_OutlineWidthMask"),
+					srcMaskProperty = "_OutlineWidthMask",
 				});
 			}
 
@@ -197,9 +229,9 @@ namespace YanK
 			}
 
 			// --- SharedMask packing (emission + optional masks) ---
-			if (opt.BakeMasks && resolvedMasks != null && resolvedMasks.Count > 0)
+			if (resolvedMasks != null && resolvedMasks.Count > 0)
 			{
-				PackSharedMask(src, dst, opt, resolvedMasks, folder, baseName);
+				PackSharedMask(src, dst, resolvedMasks, folder, baseName);
 			}
 		}
 
@@ -440,163 +472,426 @@ namespace YanK
 
 			Color shadowColor = src.HasProperty("_ShadowColor") ? src.GetColor("_ShadowColor") : new Color(0.5f, 0.5f, 0.5f, 1f);
 
-			const int W = 128, H = 4;
-			var gradArr = new Texture2DArray(W, H, 1, TextureFormat.RGBA32, false, true);
-			var pixels  = new Color[W * H];
-			for (int y = 0; y < H; y++)
-				for (int x = 0; x < W; x++)
-					pixels[y * W + x] = Color.Lerp(shadowColor, Color.white, x / (float)(W - 1));
-			gradArr.SetPixels(pixels, 0, 0);
-			gradArr.Apply();
-			gradArr.filterMode = FilterMode.Bilinear;
-			gradArr.wrapMode   = TextureWrapMode.Clamp;
+			var gradient = new Gradient
+			{
+				mode = GradientMode.Blend
+			};
+			gradient.SetKeys(
+				new[]
+				{
+					new GradientColorKey(shadowColor, 0f),
+					new GradientColorKey(Color.white, 1f),
+				},
+				new[]
+				{
+					new GradientAlphaKey(shadowColor.a, 0f),
+					new GradientAlphaKey(1f, 1f),
+				});
 
 			string path = AssetDatabase.GenerateUniqueAssetPath(
-			    Path.Combine(folder, baseName + "_Shade_NTBake.asset").Replace('\\', '/'));
-			AssetDatabase.CreateAsset(gradArr, path);
-			return AssetDatabase.LoadAssetAtPath<Texture2DArray>(path);
+				Path.Combine(folder, baseName + "_Shade_NTBake.scgradients").Replace('\\', '/'));
+			try
+			{
+				File.WriteAllBytes(path, System.Array.Empty<byte>());
+				AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+
+				var importer = AssetImporter.GetAtPath(path);
+				if (importer == null)
+					throw new System.InvalidOperationException("Shader Core's .scgradients importer was not found.");
+
+				var serializedImporter = new SerializedObject(importer);
+				serializedImporter.Update();
+				var sizeProp = serializedImporter.FindProperty("size");
+				var gradientsProp = serializedImporter.FindProperty("gradients");
+				if (sizeProp == null || gradientsProp == null || !gradientsProp.isArray)
+					throw new System.InvalidOperationException("The imported asset is not using Shader Core's GradientsImporter schema.");
+
+				sizeProp.intValue = 128;
+				gradientsProp.arraySize = 1;
+				var gradientProp = gradientsProp.GetArrayElementAtIndex(0);
+				if (gradientProp == null)
+					throw new System.InvalidOperationException("Shader Core did not expose a gradient element.");
+				gradientProp.gradientValue = gradient;
+				serializedImporter.ApplyModifiedPropertiesWithoutUndo();
+				importer.SaveAndReimport();
+
+				var result = AssetDatabase.LoadAssetAtPath<Texture2DArray>(path);
+				if (result == null)
+					throw new System.InvalidOperationException("Shader Core did not generate a Texture2DArray.");
+				return result;
+			}
+			catch (System.Exception ex)
+			{
+				Debug.LogError($"[YNC] Could not create editable shadow gradients at {path}: {ex.Message}");
+				if (!AssetDatabase.DeleteAsset(path) && File.Exists(path)) File.Delete(path);
+				return null;
+			}
 		}
 
 		// =====================================================================
-		// SharedMask packing
+		// Editable SharedMask asset
 		// =====================================================================
 
-		private static void PackSharedMask(Material src, Material dst, ConverterOptions opt,
-		                                    List<MaskCandidate> candidates,
+		private static void PackSharedMask(Material src, Material dst, List<MaskCandidate> candidates,
 		                                    string folder, string baseName)
 		{
-			// Determine canvas size
-			int w = 4, h = 4;
-			foreach (var c in candidates)
+			if (dst == null || !dst.HasProperty("_SharedMask")) return;
+
+			var channels = new List<EditableMaskChannel>();
+			int channelCount = Mathf.Min(candidates.Count, 4);
+			for (int ch = 0; ch < channelCount; ch++)
 			{
-				if (c.srcMask != null)
-				{
-					w = Mathf.Max(w, c.srcMask.width);
-					h = Mathf.Max(h, c.srcMask.height);
-				}
+				channels.Add(PrepareEditableMaskChannel(src, candidates[ch], folder, baseName, ch));
 			}
 
-			var outTex  = new Texture2D(w, h, TextureFormat.RGBA32, false);
-			var outPx   = new Color[w * h];
-			// Default white (channel = 1 → full effect)
-			for (int i = 0; i < outPx.Length; i++) outPx[i] = Color.white;
+			var sharedMask = CreateEditableSharedMask(channels, folder, baseName + "_Mask_NTBake");
+			if (sharedMask == null) return;
 
-			// Pack emission separately (needs luma bake)
-			for (int ch = 0; ch < Mathf.Min(candidates.Count, 4); ch++)
+			// Commit feature channel indices only after the editable asset imported successfully.
+			// Otherwise NonToon's default white mask could turn a failed emission conversion global.
+			dst.SetTexture("_SharedMask", sharedMask);
+			for (int ch = 0; ch < channelCount; ch++)
 			{
 				var cand = candidates[ch];
-
-				Color[] gray;
-				if (cand.isEmission)
-					gray = BakeEmissionToGrayscale(src, w, h, cand.srcMask);
-				else
-					gray = SampleMaskGrayscale(cand.srcMask, w, h);
-
-				if (gray == null) continue;
-
-				for (int i = 0; i < outPx.Length; i++)
-				{
-					float v = gray[i].r;
-					switch (ch)
-					{
-						case 0: outPx[i].r = v; break;
-						case 1: outPx[i].g = v; break;
-						case 2: outPx[i].b = v; break;
-						case 3: outPx[i].a = v; break;
-					}
-				}
-
-				// Assign channel index to NonToon feature
 				SetIntIfExists(dst, cand.maskChannelProp, ch);
+				if (!cand.isEmission) continue;
 
-				// Activate Lighten / LightBoostAsEmission for emission
-				if (cand.isEmission)
-				{
-					SetIntIfExists(dst, P_Lighten + "LightBoostAsEmission", 1);
-					SetFloatIfExists(dst, P_Lighten + "LightBoost", 1f);
-					Debug.Log("[YNC] Emission ported to Lighten (grayscale only — color information is lost).");
-				}
+				SetIntIfExists(dst, P_Lighten + "LightBoostAsEmission", 1);
+				float lightBoost = CalculateEmissionLightBoost(src);
+				SetFloatIfExists(dst, P_Lighten + "LightBoost", lightBoost);
+				Debug.Log($"[YNC] Emission ported to Lighten with Light Boost {lightBoost:0.###} " +
+				          "(grayscale approximation — color information is lost).");
 			}
-
-			outTex.SetPixels(outPx);
-			outTex.Apply();
-
-			var sharedMask = SaveTexturePng(outTex, folder, baseName + "_Mask_NTBake");
-			if (sharedMask != null && dst.HasProperty("_SharedMask"))
-				dst.SetTexture("_SharedMask", sharedMask);
 		}
 
-		/// <summary>
-		/// Bakes lilToon emission (map × color, with alpha as strength — B1) into a grayscale buffer,
-		/// then multiplies in <paramref name="blendMask"/> if the source used `_EmissionBlendMask`
-		/// (B2) — that mask cuts OUT parts of the emission map/color; it is a SEPARATE texture from
-		/// `_EmissionMap`.
-		/// </summary>
-		private static Color[] BakeEmissionToGrayscale(Material src, int targetW, int targetH, Texture blendMask)
+		private static EditableMaskChannel PrepareEditableMaskChannel(Material src, MaskCandidate candidate,
+		                                                              string folder, string baseName, int channelIndex)
 		{
-			var emTex = src.HasProperty("_EmissionMap") ? src.GetTexture("_EmissionMap") : null;
-			Color emColor = src.HasProperty("_EmissionColor") ? src.GetColor("_EmissionColor") : Color.white;
-			float luma  = 0.299f * emColor.r + 0.587f * emColor.g + 0.114f * emColor.b;
-			// B1: alpha is the emission strength in lilToon — fold it into the bias.
-			float alpha = src.HasProperty("_EmissionColor") ? Mathf.Clamp01(emColor.a) : 1f;
-			float bias  = luma * alpha;
+			if (!candidate.isEmission)
+			{
+				if (candidate.srcMask is Texture2D direct &&
+				    CanLinkUvMainTextureDirectly(src, candidate.srcMaskProperty, direct))
+					return new EditableMaskChannel { texture = direct, mode = ShaderCoreMaskModeR };
 
-			Color[] basePixels;
-			if (emTex != null)
-			{
-				basePixels = SampleMaskGrayscale(emTex, targetW, targetH, useLuma: true);
-				for (int i = 0; i < basePixels.Length; i++)
-				{
-					float v = basePixels[i].r * bias;
-					basePixels[i] = new Color(v, v, v, 1f);
-				}
-			}
-			else
-			{
-				basePixels = new Color[targetW * targetH];
-				for (int i = 0; i < basePixels.Length; i++)
-					basePixels[i] = new Color(bias, bias, bias, 1f);
+				if (candidate.srcMask == null)
+					return new EditableMaskChannel { mode = ShaderCoreMaskModeR, fallbackValue = 1f };
+
+				GetUvMainTextureTransform(src, candidate.srcMaskProperty, out Vector2 scale, out Vector2 offset);
+				var baked = BakeSingleMaskTexture(candidate.srcMask, folder,
+					baseName + "_Channel" + channelIndex + "_NTBake", useLuminance: false, scale, offset);
+				return new EditableMaskChannel { texture = baked, mode = ShaderCoreMaskModeR };
 			}
 
-			// B2: multiply in the separate emission blend mask, if any.
-			if (blendMask != null)
-			{
-				var maskPixels = SampleMaskGrayscale(blendMask, targetW, targetH);
-				if (maskPixels != null)
-				{
-					for (int i = 0; i < basePixels.Length; i++)
-					{
-						float v = basePixels[i].r * maskPixels[i].r;
-						basePixels[i] = new Color(v, v, v, 1f);
-					}
-				}
-			}
+			Texture emissionMap = GetMeaningfulMaterialTexture(src, "_EmissionMap");
+			Texture blendMask = GetMeaningfulMaterialTexture(src, "_EmissionBlendMask");
+			var emissionMap2D = emissionMap as Texture2D;
+			var blendMask2D = blendMask as Texture2D;
 
-			return basePixels;
+			// Shader Core can perform luminance or R-channel extraction itself. Keep the original
+			// source editable whenever only one persistent texture participates in the result.
+			if (emissionMap != null && blendMask == null &&
+			    CanLinkEmissionTextureDirectly(src, "_EmissionMap", emissionMap2D))
+				return CreateDirectEmissionMapChannel(src, emissionMap2D);
+			if (emissionMap == null && blendMask != null &&
+			    CanLinkEmissionTextureDirectly(src, "_EmissionBlendMask", blendMask2D))
+				return CreateDirectEmissionMapChannel(src, blendMask2D);
+			if (emissionMap == null && blendMask == null)
+				return new EditableMaskChannel { mode = ShaderCoreMaskModeR, fallbackValue = 1f };
+
+			// Map × blend mask (or a non-persistent source) cannot be represented by one .scmask
+			// channel, so bake only that spatial product and keep HDR/color strength in LightBoost.
+			var composite = BakeEmissionSpatialMask(src, emissionMap, blendMask, folder,
+				baseName + "_EmissionComposite_NTBake");
+			return new EditableMaskChannel { texture = composite, mode = ShaderCoreMaskModeR };
 		}
 
-		private static Color[] SampleMaskGrayscale(Texture src, int targetW, int targetH, bool useLuma = false)
+		private static EditableMaskChannel CreateDirectEmissionMapChannel(Material material, Texture2D texture)
+		{
+			Color color = material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.white;
+			float r = Mathf.Max(0f, color.r), g = Mathf.Max(0f, color.g), b = Mathf.Max(0f, color.b);
+			float luminance = 0.2126729f * r + 0.7151522f * g + 0.0721750f * b;
+			if (luminance <= 0.000001f)
+				return new EditableMaskChannel { texture = texture, mode = ShaderCoreMaskModeLuminance };
+
+			// Y(C*T)/Y(C) is a linear dot product, so Shader Core's Custom channel mode can
+			// preserve colored emission-map energy while still linking the original texture.
+			return new EditableMaskChannel
+			{
+				texture = texture,
+				mode = ShaderCoreMaskModeCustom,
+				blend = new Vector4(0.2126729f * r / luminance,
+				                    0.7151522f * g / luminance,
+				                    0.0721750f * b / luminance, 0f),
+			};
+		}
+
+		private static Texture GetMeaningfulMaterialTexture(Material material, string propertyName)
+		{
+			if (material == null || !material.HasProperty(propertyName)) return null;
+			var texture = material.GetTexture(propertyName);
+			if (texture == null || texture == Texture2D.whiteTexture) return null;
+			return texture;
+		}
+
+		private static bool CanLinkEmissionTextureDirectly(Material material, string propertyName, Texture2D texture)
+		{
+			bool standardEmission = material.HasProperty("_EmissionBlend");
+			if (texture == null || !AssetDatabase.Contains(texture) ||
+			    (standardEmission && TextureAlphaRequiresBake(texture)))
+				return false;
+
+			if (propertyName == "_EmissionBlendMask")
+			{
+				// Installed full lilToon variants define ANIMATE_EMISSION_MASK_UV, whose path
+				// samples this mask from raw UV0 with its own ST (not fd.uvMain).
+				Vector2 maskScale = material.GetTextureScale(propertyName);
+				Vector2 maskOffset = material.GetTextureOffset(propertyName);
+				return Approximately(maskScale, Vector2.one) && Approximately(maskOffset, Vector2.zero) &&
+				       !HasUvAnimation(material, propertyName);
+			}
+
+			Vector2 scale = material.GetTextureScale(propertyName);
+			Vector2 offset = material.GetTextureOffset(propertyName);
+			if (!Approximately(scale, Vector2.one) || !Approximately(offset, Vector2.zero)) return false;
+			if (material.HasProperty("_EmissionMap_UVMode") &&
+			    Mathf.RoundToInt(material.GetFloat("_EmissionMap_UVMode")) != 0) return false;
+			if (material.HasProperty("_EmissionParallaxDepth") &&
+			    !Mathf.Approximately(material.GetFloat("_EmissionParallaxDepth"), 0f)) return false;
+
+			return !HasUvAnimation(material, propertyName);
+		}
+
+		private static bool CanLinkUvMainTextureDirectly(Material material, string propertyName, Texture2D texture)
+		{
+			if (material == null || texture == null || !AssetDatabase.Contains(texture) ||
+			    string.IsNullOrEmpty(propertyName)) return false;
+
+			GetUvMainTextureTransform(material, propertyName, out Vector2 scale, out Vector2 offset);
+			return Approximately(scale, Vector2.one) && Approximately(offset, Vector2.zero) &&
+			       !HasUvAnimation(material, "_MainTex") && !HasUvAnimation(material, propertyName);
+		}
+
+		private static void GetUvMainTextureTransform(Material material, string propertyName,
+		                                              out Vector2 scale, out Vector2 offset)
+		{
+			Vector2 mainScale = material != null && material.HasProperty("_MainTex")
+				? material.GetTextureScale("_MainTex") : Vector2.one;
+			Vector2 mainOffset = material != null && material.HasProperty("_MainTex")
+				? material.GetTextureOffset("_MainTex") : Vector2.zero;
+			Vector2 textureScale = material != null && !string.IsNullOrEmpty(propertyName) && material.HasProperty(propertyName)
+				? material.GetTextureScale(propertyName) : Vector2.one;
+			Vector2 textureOffset = material != null && !string.IsNullOrEmpty(propertyName) && material.HasProperty(propertyName)
+				? material.GetTextureOffset(propertyName) : Vector2.zero;
+
+			scale = Vector2.Scale(mainScale, textureScale);
+			offset = Vector2.Scale(mainOffset, textureScale) + textureOffset;
+		}
+
+		private static bool HasUvAnimation(Material material, string propertyName)
+		{
+			string animationProperty = propertyName + "_ScrollRotate";
+			return material != null && material.HasProperty(animationProperty) &&
+			       material.GetVector(animationProperty) != Vector4.zero;
+		}
+
+		private static bool Approximately(Vector2 a, Vector2 b)
+		{
+			return Mathf.Approximately(a.x, b.x) && Mathf.Approximately(a.y, b.y);
+		}
+
+		private static bool TextureAlphaRequiresBake(Texture2D texture)
+		{
+			var importer = AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(texture)) as TextureImporter;
+			if (importer == null) return true; // Unknown generated texture: preserve correctness conservatively.
+			if (importer.alphaSource == TextureImporterAlphaSource.None) return false;
+			if (importer.alphaSource == TextureImporterAlphaSource.FromGrayScale) return true;
+			return importer.DoesSourceTextureHaveAlpha();
+		}
+
+		private static Texture2D BakeSingleMaskTexture(Texture source, string folder, string name,
+		                                               bool useLuminance, Vector2? scale = null,
+		                                               Vector2? offset = null)
+		{
+			if (source == null) return null;
+			int width = Mathf.Max(4, source.width);
+			int height = Mathf.Max(4, source.height);
+			var pixels = SampleMaskGrayscale(source, width, height, useLuminance, scale, offset);
+			if (pixels == null) return null;
+
+			var output = new Texture2D(width, height, TextureFormat.RGBA32, false);
+			for (int i = 0; i < pixels.Length; i++)
+			{
+				float value = pixels[i].r;
+				pixels[i] = new Color(value, value, value, 1f);
+			}
+			output.SetPixels(pixels);
+			output.Apply();
+			return SaveTexturePng(output, folder, name);
+		}
+
+		private static Texture2D BakeEmissionSpatialMask(Material material, Texture emissionMap, Texture blendMask,
+		                                                        string folder, string name)
+		{
+			int width = 4, height = 4;
+			if (emissionMap != null) { width = Mathf.Max(width, emissionMap.width); height = Mathf.Max(height, emissionMap.height); }
+			if (blendMask != null) { width = Mathf.Max(width, blendMask.width); height = Mathf.Max(height, blendMask.height); }
+
+			var emissionPixels = emissionMap != null
+				? SampleMaskGrayscale(emissionMap, width, height, useLuma: false,
+					material.GetTextureScale("_EmissionMap"), material.GetTextureOffset("_EmissionMap"))
+				: null;
+			var blendPixels = blendMask != null
+				? SampleMaskGrayscale(blendMask, width, height, useLuma: false,
+					material.GetTextureScale("_EmissionBlendMask"), material.GetTextureOffset("_EmissionBlendMask"))
+				: null;
+			Color emissionColor = material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.white;
+			float colorR = Mathf.Max(0f, emissionColor.r), colorG = Mathf.Max(0f, emissionColor.g), colorB = Mathf.Max(0f, emissionColor.b);
+			float colorLuminance = 0.2126729f * colorR + 0.7151522f * colorG + 0.0721750f * colorB;
+			Vector3 weights = colorLuminance > 0.000001f
+				? new Vector3(0.2126729f * colorR / colorLuminance,
+				              0.7151522f * colorG / colorLuminance,
+				              0.0721750f * colorB / colorLuminance)
+				: new Vector3(0.2126729f, 0.7151522f, 0.0721750f);
+
+			var outputPixels = new Color[width * height];
+			for (int i = 0; i < outputPixels.Length; i++)
+			{
+				Color map = emissionPixels == null ? Color.white : emissionPixels[i];
+				Color mask = blendPixels == null ? Color.white : blendPixels[i];
+				float alphaFactor = material.HasProperty("_EmissionBlend") ? map.a * mask.a : 1f;
+				float value = Mathf.Clamp01(
+					(weights.x * map.r * mask.r + weights.y * map.g * mask.g + weights.z * map.b * mask.b) *
+					alphaFactor);
+				outputPixels[i] = new Color(value, value, value, 1f);
+			}
+
+			var output = new Texture2D(width, height, TextureFormat.RGBA32, false);
+			output.SetPixels(outputPixels);
+			output.Apply();
+			return SaveTexturePng(output, folder, name);
+		}
+
+		private static float CalculateEmissionLightBoost(Material src)
+		{
+			Color color = src.HasProperty("_EmissionColor") ? src.GetColor("_EmissionColor") : Color.white;
+			float luminance = 0.2126729f * Mathf.Max(0f, color.r) +
+			                  0.7151522f * Mathf.Max(0f, color.g) +
+			                  0.0721750f * Mathf.Max(0f, color.b);
+			bool standardEmission = src.HasProperty("_EmissionBlend");
+			float alpha = standardEmission ? Mathf.Max(0f, color.a) : 1f;
+			float blend = standardEmission ? Mathf.Clamp01(src.GetFloat("_EmissionBlend")) : 1f;
+
+			// NonToon applies LightBoost as an absolute lighting floor. Using 1.0 as the
+			// baseline over-brightens typical avatar/world lighting; 1/8 plus the source
+			// emission energy better matches lilToon's default Add emission in practice.
+			// SetFloat may retain HDR values above the inspector's nominal 0..10 slider range.
+			return Mathf.Min(65500f, NonToonEmissionLightBaseline + luminance * alpha * blend);
+		}
+
+		private static Texture2D CreateEditableSharedMask(IList<EditableMaskChannel> channels,
+		                                                        string folder, string name)
+		{
+			string path = AssetDatabase.GenerateUniqueAssetPath(
+				Path.Combine(folder, name + ".scmask").Replace('\\', '/'));
+			try
+			{
+				File.WriteAllBytes(path, System.Array.Empty<byte>());
+				AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+
+				var importer = AssetImporter.GetAtPath(path);
+				if (importer == null)
+					throw new System.InvalidOperationException("Shader Core's .scmask importer was not found.");
+
+				var serializedImporter = new SerializedObject(importer);
+				serializedImporter.Update();
+				var widthProp = serializedImporter.FindProperty("width");
+				var heightProp = serializedImporter.FindProperty("height");
+				if (widthProp == null || heightProp == null)
+					throw new System.InvalidOperationException("The imported asset is not using Shader Core's MaskImporter schema.");
+
+				int width = 32, height = 32;
+				foreach (var channel in channels)
+				{
+					if (channel?.texture == null) continue;
+					width = Mathf.Max(width, channel.texture.width);
+					height = Mathf.Max(height, channel.texture.height);
+				}
+				widthProp.intValue = Mathf.Clamp(Mathf.NextPowerOfTwo(width), 32, 8192);
+				heightProp.intValue = Mathf.Clamp(Mathf.NextPowerOfTwo(height), 32, 8192);
+
+				string[] channelNames = { "R", "G", "B", "A" };
+				var textureProps = new SerializedProperty[channelNames.Length];
+				var modeProps = new SerializedProperty[channelNames.Length];
+				var blendProps = new SerializedProperty[channelNames.Length];
+				var fallbackProps = new SerializedProperty[channelNames.Length];
+				for (int i = 0; i < channelNames.Length; i++)
+				{
+					var channelProp = serializedImporter.FindProperty(channelNames[i]);
+					textureProps[i] = channelProp?.FindPropertyRelative("tex");
+					modeProps[i] = channelProp?.FindPropertyRelative("mode");
+					blendProps[i] = channelProp?.FindPropertyRelative("blend");
+					fallbackProps[i] = channelProp?.FindPropertyRelative("fallbackValue");
+					if (textureProps[i] == null || modeProps[i] == null || blendProps[i] == null || fallbackProps[i] == null)
+						throw new System.InvalidOperationException($"Shader Core's {channelNames[i]} mask channel schema is unavailable.");
+				}
+
+				for (int i = 0; i < channelNames.Length; i++)
+				{
+					var data = i < channels.Count && channels[i] != null
+						? channels[i]
+						: new EditableMaskChannel { mode = ShaderCoreMaskModeR, fallbackValue = 1f };
+					textureProps[i].objectReferenceValue = data.texture;
+					modeProps[i].enumValueIndex = data.mode;
+					blendProps[i].vector4Value = data.blend;
+					fallbackProps[i].floatValue = data.fallbackValue;
+				}
+
+				serializedImporter.ApplyModifiedPropertiesWithoutUndo();
+				importer.SaveAndReimport();
+				var result = AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+				if (result == null)
+					throw new System.InvalidOperationException("Shader Core did not generate a Texture2D.");
+				return result;
+			}
+			catch (System.Exception ex)
+			{
+				Debug.LogError($"[YNC] Could not create editable SharedMask at {path}: {ex.Message}");
+				if (!AssetDatabase.DeleteAsset(path) && File.Exists(path)) File.Delete(path);
+				return null;
+			}
+		}
+
+		private static Color[] SampleMaskGrayscale(Texture src, int targetW, int targetH, bool useLuma = false,
+		                                           Vector2? scale = null, Vector2? offset = null)
 		{
 			if (src == null) return null;
-			var rt   = RenderTexture.GetTemporary(targetW, targetH, 0, RenderTextureFormat.ARGB32);
 			var prev = RenderTexture.active;
-			Graphics.Blit(src, rt);
-			RenderTexture.active = rt;
-			var tmp = new Texture2D(targetW, targetH, TextureFormat.RGBA32, false);
-			tmp.ReadPixels(new Rect(0, 0, targetW, targetH), 0, 0);
-			tmp.Apply();
-			RenderTexture.active = prev;
-			RenderTexture.ReleaseTemporary(rt);
-
-			var px  = tmp.GetPixels();
-			Object.DestroyImmediate(tmp);
+			RenderTexture rt = null;
+			Texture2D tmp = null;
+			Color[] px;
+			try
+			{
+				rt = RenderTexture.GetTemporary(targetW, targetH, 0, RenderTextureFormat.ARGB32);
+				Graphics.Blit(src, rt, scale ?? Vector2.one, offset ?? Vector2.zero);
+				RenderTexture.active = rt;
+				tmp = new Texture2D(targetW, targetH, TextureFormat.RGBA32, false);
+				tmp.ReadPixels(new Rect(0, 0, targetW, targetH), 0, 0);
+				tmp.Apply();
+				px = tmp.GetPixels();
+			}
+			finally
+			{
+				RenderTexture.active = prev;
+				if (rt != null) RenderTexture.ReleaseTemporary(rt);
+				if (tmp != null) Object.DestroyImmediate(tmp);
+			}
 
 			if (!useLuma) return px; // caller reads .r channel
 			// Convert to grayscale (luma)
 			for (int i = 0; i < px.Length; i++)
 			{
-				float v = 0.299f * px[i].r + 0.587f * px[i].g + 0.114f * px[i].b;
-				px[i] = new Color(v, v, v, 1f);
+				float v = 0.2126729f * px[i].r + 0.7151522f * px[i].g + 0.0721750f * px[i].b;
+				px[i] = new Color(v, v, v, px[i].a);
 			}
 			return px;
 		}

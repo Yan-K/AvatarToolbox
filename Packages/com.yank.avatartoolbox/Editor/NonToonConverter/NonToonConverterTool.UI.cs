@@ -148,19 +148,19 @@ namespace YanK
 						"Composite Color + HSVG + 2nd/3rd layers into a single texture using lilToon's baker",
 						options.BakeMainTex,   SetBakeMainTex);
 					DrawAdvancedToggle("ncBakeAlphaMask", "Bake Alpha Mask",
-						"Bake an enabled lilToon alpha mask into the base texture's alpha channel",
+						"Bake an enabled lilToon alpha mask with non-extreme transparency/cutoff into the base texture's alpha channel",
 						options.BakeAlphaMask, SetBakeAlphaMask);
-					DrawAdvancedToggle("ncBakeEmission",  "Bake Emission (grayscale)",
-						"Port emission to NonToon Lighten. Color information is lost — grayscale only.",
+					DrawAdvancedToggle("ncBakeEmission",  "Bake Emission",
+						"Port HDR color, alpha, Blend and texture strength through an editable SharedMask. Optimized for lilToon's Add mode; color remains grayscale.",
 						options.BakeEmission,  SetBakeEmission);
 					DrawAdvancedToggle("ncBakeNormalMap", "Bake Normal Map (tiling)",
 						"Re-bake normal map when tiling/offset is non-default",
 						options.BakeNormalMap, SetBakeNormalMap);
-					DrawAdvancedToggle("ncBakeMasks",     "Pack SharedMask",
-						"Pack per-feature masks into NonToon's RGBA SharedMask texture",
+					DrawAdvancedToggle("ncBakeMasks",     "Create SharedMask",
+						"Create a Shader Core .scmask whose RGBA slots link original textures or required composite bakes",
 						options.BakeMasks,     SetBakeMasks);
-					DrawAdvancedToggle("ncBakeShadow",    "Bake Shadow Gradient",
-						"Build a SharedGradients Texture2DArray ramp from lilToon shadow color",
+					DrawAdvancedToggle("ncBakeShadow",    "Create Shadow Gradients",
+						"Create an editable Shader Core .scgradients asset from lilToon shadow color",
 						options.BakeShadow,    SetBakeShadow);
 					EditorGUILayout.EndVertical();
 
