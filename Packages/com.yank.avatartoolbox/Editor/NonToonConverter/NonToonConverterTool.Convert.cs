@@ -114,6 +114,7 @@ namespace YanK
 			}
 
 			Undo.CollapseUndoOperations(undoGroup);
+
 			string doneMessage = string.Format(L("ncConvertDone", "Converted {0} material(s). {1} failed."), succeeded, failed);
 			if (skippedFur > 0)
 				doneMessage += "\n" + string.Format(L("ncConvertSkippedFur", "{0} Fur material(s) skipped (Convert Fur is off — left as lilToon)."), skippedFur);
@@ -436,32 +437,64 @@ namespace YanK
 			{
 				string cProp = P_MatCaps + (mul1 ? "MatCapMultiplyColor" : "MatCapAddColor");
 				string tProp = P_MatCaps + (mul1 ? "MatCapMultiply"      : "MatCapAdd");
+				float  s1    = MatCapStrength(src, "_MatCapColor", "_MatCapBlend");
 				if (src.HasProperty("_MatCapColor") && dst.HasProperty(cProp))
-					dst.SetColor(cProp, HdrToLdr(src.GetColor("_MatCapColor"), applyAlpha: false));
-				AssignMatCapTex(src, "_MatCapTex",    "_MatCapLod",    dst, tProp, folder, baseName + "_MatCap1");
+				{
+					Color c = HdrToLdr(src.GetColor("_MatCapColor"), applyAlpha: false);
+					// Add slot is linear in color → fold strength into RGB. Multiply slot keeps the
+					// tint; strength is baked into the texture (fade toward white) instead.
+					if (!mul1) { c.r *= s1; c.g *= s1; c.b *= s1; }
+					dst.SetColor(cProp, c);
+				}
+				AssignMatCapTex(src, "_MatCapTex",    "_MatCapLod",    dst, tProp, mul1, s1, folder, baseName + "_MatCap1");
 			}
 			if (use2)
 			{
 				string cProp = P_MatCaps + (mul2 ? "MatCapMultiplyColor" : "MatCapAddColor");
 				string tProp = P_MatCaps + (mul2 ? "MatCapMultiply"      : "MatCapAdd");
+				float  s2    = MatCapStrength(src, "_MatCap2ndColor", "_MatCap2ndBlend");
 				if (src.HasProperty("_MatCap2ndColor") && dst.HasProperty(cProp))
-					dst.SetColor(cProp, HdrToLdr(src.GetColor("_MatCap2ndColor"), applyAlpha: false));
-				AssignMatCapTex(src, "_MatCap2ndTex", "_MatCap2ndLod", dst, tProp, folder, baseName + "_MatCap2");
+				{
+					Color c = HdrToLdr(src.GetColor("_MatCap2ndColor"), applyAlpha: false);
+					if (!mul2) { c.r *= s2; c.g *= s2; c.b *= s2; }
+					dst.SetColor(cProp, c);
+				}
+				AssignMatCapTex(src, "_MatCap2ndTex", "_MatCap2ndLod", dst, tProp, mul2, s2, folder, baseName + "_MatCap2");
 			}
 		}
 
+		/// <summary>
+		/// lilToon blends a matcap with strength <c>_MatCapBlend * _MatCapColor.a * mask</c>
+		/// (lil_common_frag.hlsl). NonToon's matcap has no blend/alpha term — the color alpha is
+		/// ignored — so the per-material scalar (blend × color.a) is lost, leaving the matcap at full
+		/// strength (glossy skin). We recover that scalar here; the caller folds it into the Add color
+		/// or the Multiply texture. The per-pixel mask term is handled separately by SharedMask packing.
+		/// </summary>
+		private static float MatCapStrength(Material src, string colorProp, string blendProp)
+		{
+			float blend = src.HasProperty(blendProp) ? src.GetFloat(blendProp) : 1f;
+			float alpha = src.HasProperty(colorProp) ? src.GetColor(colorProp).a : 1f;
+			return Mathf.Clamp01(blend) * Mathf.Clamp01(alpha);
+		}
+
 		private static void AssignMatCapTex(Material src, string srcTexProp, string lodProp,
-		                                     Material dst, string dstTexProp,
+		                                     Material dst, string dstTexProp, bool multiply, float strength,
 		                                     string folder, string nameNoExt)
 		{
 			if (!src.HasProperty(srcTexProp) || !dst.HasProperty(dstTexProp)) return;
 			var srcTex = src.GetTexture(srcTexProp) as Texture2D;
 			if (srcTex == null) return;
 
-			float lod    = src.HasProperty(lodProp) ? src.GetFloat(lodProp) : 0f;
-			var   result = lod > 0.05f
-			               ? BakeBlurredTexture(srcTex, lod, folder, nameNoExt)
-			               : srcTex;
+			float lod = src.HasProperty(lodProp) ? src.GetFloat(lodProp) : 0f;
+			// Multiply matcaps carry their strength in the texture (fade toward white); Add matcaps
+			// already have it folded into the color, so pass strength = 1 to skip the fade.
+			float texStrength = multiply ? strength : 1f;
+
+			bool needBlur = lod > 0.05f;
+			bool needFade = texStrength < 0.996f;
+			var  result   = (needBlur || needFade)
+			                ? BakeMatCap(srcTex, needBlur ? lod : 0f, texStrength, folder, nameNoExt)
+			                : srcTex;
 
 			if (result != null) dst.SetTexture(dstTexProp, result);
 		}
