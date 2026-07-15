@@ -50,6 +50,11 @@ jobs:
           echo "unityPackage=${{ vars.PACKAGE_NAME }}-${{ steps.version.outputs.value }}.unitypackage" >> $GITHUB_ENV
           echo "version=${{ steps.version.outputs.value }}" >> $GITHUB_ENV
 
+      # Zip the Package for release
+      - name: Create Package Zip
+        working-directory: "${{ env.packagePath }}"
+        run: zip -r "${{ github.workspace }}/${{ env.zipFile }}" .
+      
       # Build a list of .meta files for future use
       - name: Track Package Meta Files
         run: find "${{ env.packagePath }}/" -name \*.meta >> metaList
@@ -60,10 +65,6 @@ jobs:
         with:
           package-path: ${{ env.unityPackage }}
           include-files: metaList
-
-      # Zip only the generated UnityPackage for release
-      - name: Create Package Zip
-        run: zip -j "${{ env.zipFile }}" "${{ env.unityPackage }}"
       
       # Make a release tag of the version from the package.json file 
       - name: Create Tag
