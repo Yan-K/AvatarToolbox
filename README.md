@@ -176,6 +176,10 @@ YNC Bug fix: better emission mask and matcap detection, fix drag and drop ui hei
 
 YNC Change: added Fur convert toggle.
 
+### v1.7.5 - 2026/07/16
+
+YNC Change: added AlphaMask bake, changed pack format to .scmask and .scgradients, better emission conversion, folder error handling.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))
