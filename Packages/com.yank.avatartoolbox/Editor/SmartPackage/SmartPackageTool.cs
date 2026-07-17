@@ -18,8 +18,6 @@ namespace YanK
 			public const string ExcludeGlobs = "YSP_ExcludeGlobs";
 			public const string LastExportFolder = "YSP_LastExportFolder";
 			public const string LastImportFolder = "YSP_LastImportFolder";
-			public const string FolderCollectionMode = "YSP_FolderCollectionMode";
-			public const string DestructiveCollection = "YSP_DestructiveCollection";
 			public const string SortMode = "YSP_SortMode";
 			public const string SortAscending = "YSP_SortAscending";
 			public const string ConflictPolicy = "YSP_ConflictPolicy";
@@ -45,7 +43,11 @@ namespace YanK
 			};
 			int newTab = GUILayout.Toolbar((int)currentTab, tabLabels, GUILayout.Height(22));
 			if (newTab != (int)currentTab)
+			{
 				currentTab = (SmartPackageTab)newTab;
+				if (currentTab == SmartPackageTab.Importer && loadedPackages.Count > 0)
+					QueueDirtyTargetRefresh();
+			}
 
 			GUILayout.Space(4);
 

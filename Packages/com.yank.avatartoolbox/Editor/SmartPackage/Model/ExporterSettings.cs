@@ -4,8 +4,6 @@ using UnityEditor;
 
 namespace YanK
 {
-	public enum FolderCollectionTopMode { None, NonDestructive, Destructive }
-
 	public class ExporterSettings
 	{
 		public enum SortMode { Name, Size, Type }
@@ -16,7 +14,6 @@ namespace YanK
 		public bool Ascending = true;
 		public string SearchText = "";
 		public FolderCollectionMode CollectionMode = FolderCollectionMode.KeepStructure;
-		public FolderCollectionTopMode TopMode = FolderCollectionTopMode.None;
 
 		// When true (default) the exporter automatically collects every asset referenced
 		// by the selection. When false, only the assets the user added (folders expand to
@@ -28,7 +25,6 @@ namespace YanK
 		private const string KeySortMode = "YSP_SortMode";
 		private const string KeySortAscending = "YSP_SortAscending";
 		private const string KeyFolderCollectionMode = "YSP_FolderCollectionMode";
-		private const string KeyTopMode = "YSP_FolderCollectionTopMode";
 		private const string KeyIncludeDependencies = "YSP_IncludeDependencies";
 
 		public void Load()
@@ -37,8 +33,10 @@ namespace YanK
 			ExcludeNamesRaw = EditorPrefs.GetString(KeyExcludeNames, "");
 			Sort = (SortMode)EditorPrefs.GetInt(KeySortMode, (int)SortMode.Name);
 			Ascending = EditorPrefs.GetBool(KeySortAscending, true);
-			CollectionMode = (FolderCollectionMode)EditorPrefs.GetInt(KeyFolderCollectionMode, (int)FolderCollectionMode.KeepStructure);
-			TopMode = (FolderCollectionTopMode)EditorPrefs.GetInt(KeyTopMode, (int)FolderCollectionTopMode.None);
+			int collectionMode = EditorPrefs.GetInt(KeyFolderCollectionMode, (int)FolderCollectionMode.KeepStructure);
+			CollectionMode = Enum.IsDefined(typeof(FolderCollectionMode), collectionMode)
+				? (FolderCollectionMode)collectionMode
+				: FolderCollectionMode.KeepStructure;
 			IncludeDependencies = EditorPrefs.GetBool(KeyIncludeDependencies, true);
 		}
 
@@ -49,7 +47,6 @@ namespace YanK
 			EditorPrefs.SetInt(KeySortMode, (int)Sort);
 			EditorPrefs.SetBool(KeySortAscending, Ascending);
 			EditorPrefs.SetInt(KeyFolderCollectionMode, (int)CollectionMode);
-			EditorPrefs.SetInt(KeyTopMode, (int)TopMode);
 			EditorPrefs.SetBool(KeyIncludeDependencies, IncludeDependencies);
 		}
 

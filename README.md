@@ -180,6 +180,11 @@ YNC Change: added Fur convert toggle.
 
 YNC Change: added AlphaMask bake, changed pack format to .scmask and .scgradients, better emission conversion, folder error handling.
 
+### v1.8.0 - 2026/07/17
+
+Localization refactor.
+YSP refactor: better GUID conflict detection, better error handling.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

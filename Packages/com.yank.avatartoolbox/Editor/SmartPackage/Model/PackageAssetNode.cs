@@ -17,6 +17,9 @@ namespace YanK
 		public bool IsExpanded = true;
 		public long FileSize;
 		public string Extension;
+		// Importer nodes can be both structural folders and actual package records.
+		// This keeps a non-empty folder's .meta associated with the visible folder node.
+		public bool HasPackageEntry;
 
 		// Importer-only aggregate flags: true when this node (or, for folders, any
 		// checked descendant) currently has a checked GUID / path conflict. Updated
@@ -27,6 +30,7 @@ namespace YanK
 		// True when this node (or any checked descendant, for folders) is an Update:
 		// the incoming asset overwrites an existing asset at the same path/GUID.
 		public bool HasCheckedUpdate;
+		public bool HasCheckedDuplicate;
 
 		// Sorts children (folders first, then by name, case-insensitive) recursively.
 		// Called once after the tree is built so per-frame drawing never re-sorts.
@@ -127,7 +131,7 @@ namespace YanK
 
 		public IEnumerable<PackageAssetNode> EnumerateCheckedLeaves()
 		{
-			if (!IsFolder)
+			if (!IsFolder || (IsFolder && Children.Count == 0 && HasPackageEntry))
 			{
 				if (IsChecked)
 					yield return this;
@@ -145,7 +149,7 @@ namespace YanK
 		// gained children). Folders that contain children are structure, not leaves.
 		public int CountLeaves()
 		{
-			if (!IsFolder)
+			if (!IsFolder || (IsFolder && Children.Count == 0 && HasPackageEntry))
 				return 1;
 
 			int total = 0;
@@ -240,6 +244,81 @@ namespace YanK
 						node.Extension = null;
 					}
 
+					parent = node;
+				}
+			}
+
+			return root;
+		}
+
+		public static PackageAssetNode BuildProjectTree(IEnumerable<UnityPackageEntry> entries)
+		{
+			PackageAssetNode root = new PackageAssetNode
+			{
+				Name = "Project",
+				FullPath = string.Empty,
+				IsFolder = true
+			};
+
+			Dictionary<string, PackageAssetNode> index =
+				new Dictionary<string, PackageAssetNode>(StringComparer.OrdinalIgnoreCase);
+
+			if (entries == null)
+				return root;
+
+			foreach (UnityPackageEntry entry in entries)
+			{
+				if (entry == null || string.IsNullOrEmpty(entry.AssetPath))
+					continue;
+				if (!ProjectPackagePath.TryNormalize(entry.AssetPath, out string path, out string error))
+					throw new InvalidDataException(error);
+
+				string[] parts = path.Split('/');
+				PackageAssetNode parent = root;
+				string accum = string.Empty;
+				for (int i = 0; i < parts.Length; i++)
+				{
+					string segment = parts[i];
+					accum = string.IsNullOrEmpty(accum) ? segment : accum + "/" + segment;
+					bool isEntryNode = i == parts.Length - 1;
+					bool shouldBeFolder = !isEntryNode || entry.IsFolder;
+
+					if (!index.TryGetValue(accum, out PackageAssetNode node))
+					{
+						node = new PackageAssetNode
+						{
+							Name = segment,
+							FullPath = accum,
+							IsFolder = shouldBeFolder,
+							Parent = parent
+						};
+						if (!shouldBeFolder)
+						{
+							int dot = segment.LastIndexOf('.');
+							node.Extension = dot >= 0 ? segment.Substring(dot).ToLowerInvariant() : string.Empty;
+						}
+						parent.Children.Add(node);
+						index[accum] = node;
+					}
+					else
+					{
+						if (!string.Equals(node.FullPath, accum, StringComparison.Ordinal))
+							throw new InvalidDataException("Case-colliding package paths: " + node.FullPath + " and " + accum);
+						if (!isEntryNode && !node.IsFolder)
+							throw new InvalidDataException("A package file is also used as a directory: " + accum);
+						if (isEntryNode && node.HasPackageEntry)
+							throw new InvalidDataException("Duplicate package pathname: " + accum);
+						if (isEntryNode && !entry.IsFolder && node.Children.Count > 0)
+							throw new InvalidDataException("A package pathname is both a file and a directory: " + accum);
+						if (shouldBeFolder)
+						{
+							node.IsFolder = true;
+							node.Extension = null;
+						}
+					}
+
+					if (isEntryNode)
+						node.HasPackageEntry = true;
 					parent = node;
 				}
 			}

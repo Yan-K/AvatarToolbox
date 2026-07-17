@@ -111,7 +111,7 @@ namespace YanK
 		private void OnRowCheckChanged()
 		{
 			if (currentTab == SmartPackageTab.Importer)
-				importerCheckVersion++;
+				RefreshImporterConflictPreview(false);
 			else
 				MarkSelectionDirty();
 		}
@@ -255,18 +255,31 @@ namespace YanK
 		private void DrawNode(PackageAssetNode node, int depth, Dictionary<string, ImportConflict> conflictByPath)
 		{
 			if (node == null) return;
+			// BuildProjectTree uses a synthetic container so project-root files and all
+			// real top-level folders can share one tree. It is not part of the package.
+			if (node.Parent == null && string.IsNullOrEmpty(node.FullPath))
+			{
+				List<PackageAssetNode> topLevel = node.Children;
+				for (int i = 0; i < topLevel.Count; i++)
+					DrawNode(topLevel[i], depth, conflictByPath);
+				return;
+			}
 
 			ImportConflictKind badgeKind = default;
 			bool hasBadge = false;
 			if (node.IsFolder)
 			{
-				if (node.HasCheckedGuidConflict) { badgeKind = ImportConflictKind.GuidConflict; hasBadge = true; }
-				else if (node.HasCheckedPathConflict) { badgeKind = ImportConflictKind.PathConflict; hasBadge = true; }
-				else if (node.HasCheckedUpdate) { badgeKind = ImportConflictKind.Update; hasBadge = true; }
+				if (node.HasCheckedGuidConflict || node.HasCheckedPathConflict || node.HasCheckedUpdate)
+				{
+					badgeKind = ImportConflictKind.GuidConflict;
+					hasBadge = true;
+				}
+				else if (node.HasCheckedDuplicate) { badgeKind = ImportConflictKind.Duplicate; hasBadge = true; }
 			}
-			else if (node.IsChecked && conflictByPath != null && conflictByPath.TryGetValue(node.FullPath, out ImportConflict c))
+			else if (node.IsChecked && conflictByPath != null && conflictByPath.TryGetValue(node.FullPath, out ImportConflict c)
+				&& !(c.Kind == ImportConflictKind.Duplicate && c.ExistingFromProject))
 			{
-				badgeKind = c.Kind;
+				badgeKind = VisibleBadgeKind(c.Kind);
 				hasBadge = true;
 			}
 
@@ -300,11 +313,20 @@ namespace YanK
 			switch (kind)
 			{
 				case ImportConflictKind.New: return L("yspConflictNew", "New");
-				case ImportConflictKind.Update: return L("yspConflictUpdate", "Existing");
-				case ImportConflictKind.PathConflict: return L("yspConflictPath", "Path conflict");
-				case ImportConflictKind.GuidConflict: return L("yspConflictGuid", "GUID conflict");
+				case ImportConflictKind.Duplicate: return L("yspConflictIdentical", "Identical");
+				case ImportConflictKind.Update:
+				case ImportConflictKind.PathConflict:
+				case ImportConflictKind.GuidConflict:
+					return L("yspConflictGuid", "GUID Conflict");
 				default: return kind.ToString();
 			}
+		}
+
+		private static ImportConflictKind VisibleBadgeKind(ImportConflictKind kind)
+		{
+			if (kind == ImportConflictKind.New || kind == ImportConflictKind.Duplicate)
+				return kind;
+			return ImportConflictKind.GuidConflict;
 		}
 
 		private void DrawConflictBadge(Rect r, ImportConflictKind kind)
@@ -316,14 +338,13 @@ namespace YanK
 				case ImportConflictKind.New:
 					bg = new Color(0.30f, 0.70f, 0.30f, 0.85f);
 					break;
+				case ImportConflictKind.Duplicate:
+					bg = new Color(0.25f, 0.50f, 0.90f, 0.85f);
+					break;
 				case ImportConflictKind.Update:
-					bg = new Color(0.30f, 0.55f, 0.90f, 0.85f);
-					break;
 				case ImportConflictKind.PathConflict:
-					bg = new Color(0.90f, 0.75f, 0.20f, 0.85f);
-					break;
 				case ImportConflictKind.GuidConflict:
-					bg = new Color(0.90f, 0.30f, 0.30f, 0.85f);
+					bg = new Color(0.85f, 0.20f, 0.20f, 0.90f);
 					break;
 				default:
 					bg = new Color(0.5f, 0.5f, 0.5f, 0.85f);

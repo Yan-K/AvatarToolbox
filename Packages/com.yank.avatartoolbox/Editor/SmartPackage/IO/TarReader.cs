@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text;
+using System.Security.Cryptography;
 
 namespace YanK
 {
@@ -23,7 +24,11 @@ namespace YanK
 			while (read < 512)
 			{
 				int n = stream.Read(header, read, 512 - read);
-				if (n <= 0) return false;
+				if (n <= 0)
+				{
+					if (read == 0) return false;
+					throw new EndOfStreamException("Truncated TAR header.");
+				}
 				read += n;
 			}
 
@@ -57,10 +62,12 @@ namespace YanK
 			return true;
 		}
 
-		public byte[] ReadEntryBytes()
+		public byte[] ReadEntryBytes(long maximumSize = int.MaxValue)
 		{
 			if (!hasCurrentEntry) throw new InvalidOperationException("No current entry");
-			byte[] buffer = new byte[currentEntrySize];
+			if (currentEntrySize < 0 || currentEntrySize > maximumSize || currentEntrySize > int.MaxValue)
+				throw new InvalidDataException("TAR member is too large to buffer: " + currentEntrySize + " bytes.");
+			byte[] buffer = new byte[(int)currentEntrySize];
 			int read = 0;
 			while (read < buffer.Length)
 			{
@@ -72,6 +79,29 @@ namespace YanK
 			hasCurrentEntry = false;
 			currentEntrySize = 0;
 			return buffer;
+		}
+
+		public string ReadEntrySha256()
+		{
+			if (!hasCurrentEntry) throw new InvalidOperationException("No current entry");
+			using (SHA256 sha = SHA256.Create())
+			{
+				byte[] buffer = new byte[64 * 1024];
+				long remaining = currentEntrySize;
+				while (remaining > 0)
+				{
+					int requested = (int)Math.Min(buffer.Length, remaining);
+					int read = stream.Read(buffer, 0, requested);
+					if (read <= 0) throw new EndOfStreamException();
+					sha.TransformBlock(buffer, 0, read, buffer, 0);
+					remaining -= read;
+				}
+				sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+				SkipPadding(currentEntrySize);
+				hasCurrentEntry = false;
+				currentEntrySize = 0;
+				return Convert.ToBase64String(sha.Hash);
+			}
 		}
 
 		public bool SkipEntry()
@@ -134,11 +164,19 @@ namespace YanK
 			s = s.Trim().Trim('\0').Trim();
 			if (s.Length == 0) return 0;
 			long value = 0;
-			for (int i = 0; i < s.Length; i++)
+			try
 			{
-				char c = s[i];
-				if (c < '0' || c > '7') break;
-				value = (value << 3) + (c - '0');
+				for (int i = 0; i < s.Length; i++)
+				{
+					char c = s[i];
+					if (c < '0' || c > '7')
+						throw new InvalidDataException("Invalid octal value in TAR header.");
+					checked { value = (value << 3) + (c - '0'); }
+				}
+			}
+			catch (OverflowException ex)
+			{
+				throw new InvalidDataException("Octal value overflows a TAR header field.", ex);
 			}
 			return value;
 		}

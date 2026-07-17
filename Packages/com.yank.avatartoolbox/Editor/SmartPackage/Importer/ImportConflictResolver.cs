@@ -5,6 +5,7 @@ namespace YanK
 	public enum ImportConflictKind
 	{
 		New,
+		Duplicate,
 		Update,
 		PathConflict,
 		GuidConflict
@@ -15,6 +16,11 @@ namespace YanK
 		public ImportConflictKind Kind;
 		public string ExistingPath;
 		public string IncomingPath;
+		public string TargetPath;
+		public string ExistingGuid;
+		public bool ExistingFromProject;
+		public bool RequiresDecision;
+		public string Message;
 	}
 
 	public static class ImportConflictResolver

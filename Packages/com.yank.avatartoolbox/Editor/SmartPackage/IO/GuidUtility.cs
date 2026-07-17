@@ -1,4 +1,7 @@
 using System.Text;
+using System;
+using System.IO;
+using System.Security.Cryptography;
 
 namespace YanK
 {
@@ -36,6 +39,20 @@ namespace YanK
 			return string.Empty;
 		}
 
+		public static bool MetaDeclaresFolder(byte[] meta)
+		{
+			if (meta == null || meta.Length == 0) return false;
+			string text = Encoding.UTF8.GetString(meta);
+			string[] lines = text.Split('\n');
+			for (int i = 0; i < lines.Length; i++)
+			{
+				string line = lines[i].Trim(TrimChars);
+				if (line.Equals("folderAsset: yes", System.StringComparison.OrdinalIgnoreCase))
+					return true;
+			}
+			return false;
+		}
+
 		public static bool IsValidGuid(string s)
 		{
 			if (string.IsNullOrEmpty(s) || s.Length != 32) return false;
@@ -46,6 +63,19 @@ namespace YanK
 				if (!ok) return false;
 			}
 			return true;
+		}
+
+		public static string ComputeSha256(byte[] bytes)
+		{
+			using (SHA256 sha = SHA256.Create())
+				return Convert.ToBase64String(sha.ComputeHash(bytes ?? Array.Empty<byte>()));
+		}
+
+		public static string ComputeSha256(Stream stream)
+		{
+			if (stream == null) throw new ArgumentNullException(nameof(stream));
+			using (SHA256 sha = SHA256.Create())
+				return Convert.ToBase64String(sha.ComputeHash(stream));
 		}
 	}
 }

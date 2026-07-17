@@ -22,15 +22,29 @@ namespace YanK
 		private Vector2 sourcesScroll;
 		private Vector2 treeScroll;
 		private Vector2 sidebarScroll;
-		private Vector2 collectionScroll;
-		private Vector2 previewScroll;
+		private Vector2 exportPreviewScroll;
 
 		private readonly Dictionary<PackageAssetNode, List<PackageAssetNode>> sortedChildrenCache
 			= new Dictionary<PackageAssetNode, List<PackageAssetNode>>();
 
 		private string folderCollectionRootName;
-		private readonly List<KeyValuePair<string, string>> previewPairs = new List<KeyValuePair<string, string>>();
-		private bool collectionPanelExpanded = false;
+		private bool exportPreviewDirty = true;
+		private readonly List<ExportPreviewItem> exportPreviewItems = new List<ExportPreviewItem>();
+
+		private sealed class ExportPreviewItem
+		{
+			public string SourcePath;
+			public string TargetPath;
+		}
+
+		private sealed class ExportPlanItem
+		{
+			public string SourcePath;
+			public string AbsoluteAssetPath;
+			public string AbsoluteMetaPath;
+			public string TargetPath;
+			public string ExpectedGuid;
+		}
 
 		// --- Perf caches ---
 		private readonly HashSet<PackageAssetNode> visibleCache = new HashSet<PackageAssetNode>();
@@ -99,7 +113,7 @@ namespace YanK
 		private void MarkSelectionDirty()
 		{
 			selectionStatsDirty = true;
-			RefreshPreview();
+			exportPreviewDirty = true;
 		}
 
 		private void EnsureSelectionStats()
@@ -255,12 +269,6 @@ namespace YanK
 
 			DrawToolbar();
 
-			if (collectionPanelExpanded)
-			{
-				DrawFolderCollectionPanel();
-				return;
-			}
-
 			DrawSources();
 
 			GUILayout.Space(4);
@@ -270,7 +278,8 @@ namespace YanK
 			DrawSidebar();
 			EditorGUILayout.EndHorizontal();
 
-			DrawFolderCollectionPanel();
+			DrawExportLayoutPanel();
+
 			DrawFooter();
 		}
 
@@ -369,19 +378,13 @@ namespace YanK
 
 			if (GUILayout.Button(L("yspReload", "Reload"), EditorStyles.toolbarButton, GUILayout.Width(80)))
 				ReloadFromSources();
-			// Export turns red in Destructive mode to warn that it will MOVE assets in the
-			// project (not just copy them into the package).
-			Color exportColor = settings.TopMode == FolderCollectionTopMode.Destructive
-				? YSP_DestructiveColor
-				: YSP_AccentColor;
-			if (DrawColoredToolbarButton(L("yspExport", "Export…"), 90, exportColor))
+			if (DrawColoredToolbarButton(L("yspExport", "Export…"), 90, YSP_AccentColor))
 				DoExport();
 
 			EditorGUILayout.EndHorizontal();
 		}
 
 		private static readonly Color YSP_AccentColor = new Color(0.88f, 0.54f, 0.17f, 1f);
-		private static readonly Color YSP_DestructiveColor = new Color(0.85f, 0.27f, 0.24f, 1f);
 
 		internal bool DrawColoredToolbarButton(string label, float width)
 		{
@@ -463,8 +466,6 @@ namespace YanK
 				settings.Save();
 				ReloadFromSources();
 			}
-
-			GUILayout.Space(6);
 
 			// Search
 			EditorGUILayout.LabelField(L("yspSearch", "Search"), EditorStyles.boldLabel);
@@ -549,6 +550,97 @@ namespace YanK
 			EditorGUILayout.EndVertical();
 		}
 
+		private void DrawExportLayoutPanel()
+		{
+			GUILayout.Space(4);
+			EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+			EditorGUILayout.LabelField(L("yspExportLayout", "Export Layout"), EditorStyles.boldLabel);
+			string[] layoutLabels = {
+				L("yspCollectionKeepStructure", "Keep Structure"),
+				L("yspCollectionAutoOrganize", "Auto Organize"),
+				L("yspCollectionSingleFolder", "Single Folder")
+			};
+			FolderCollectionMode newMode = (FolderCollectionMode)GUILayout.Toolbar(
+				(int)settings.CollectionMode, layoutLabels, GUILayout.Height(22f));
+			if (newMode != settings.CollectionMode)
+			{
+				settings.CollectionMode = newMode;
+				settings.Save();
+				exportPreviewDirty = true;
+			}
+
+			if (settings.CollectionMode != FolderCollectionMode.KeepStructure)
+			{
+				GUILayout.Space(4);
+				EditorGUILayout.BeginHorizontal();
+				EditorGUILayout.LabelField(L("yspCollectionRoot", "Root folder name"), GUILayout.Width(130f));
+				string newRootName = EditorGUILayout.TextField(folderCollectionRootName);
+				if (newRootName != folderCollectionRootName)
+				{
+					folderCollectionRootName = newRootName;
+					exportPreviewDirty = true;
+				}
+				if (GUILayout.Button(L("yspRefreshPreview", "Refresh Preview"), GUILayout.Width(120f)))
+					exportPreviewDirty = true;
+				EditorGUILayout.EndHorizontal();
+
+				EnsureExportPreview();
+				EditorGUILayout.LabelField(
+					string.Format(L("yspPreviewCount", "{0} entries"), exportPreviewItems.Count),
+					EditorStyles.miniLabel);
+
+				exportPreviewScroll = EditorGUILayout.BeginScrollView(
+					exportPreviewScroll,
+					EditorStyles.helpBox,
+					GUILayout.MinHeight(70f),
+					GUILayout.MaxHeight(140f));
+				if (exportPreviewItems.Count == 0)
+				{
+					EditorGUILayout.LabelField(L("yspPreviewEmpty", "(no preview)"), centeredMessageStyle, GUILayout.MinHeight(48f));
+				}
+				else
+				{
+					for (int i = 0; i < exportPreviewItems.Count; i++)
+					{
+						ExportPreviewItem item = exportPreviewItems[i];
+						EditorGUILayout.SelectableLabel(
+							item.SourcePath + "  →  " + item.TargetPath,
+							EditorStyles.miniLabel,
+							GUILayout.Height(16f));
+					}
+				}
+				EditorGUILayout.EndScrollView();
+			}
+
+			EditorGUILayout.EndVertical();
+		}
+
+		private void EnsureExportPreview()
+		{
+			if (!exportPreviewDirty)
+				return;
+
+			exportPreviewDirty = false;
+			exportPreviewItems.Clear();
+			if (rootNode == null || settings.CollectionMode == FolderCollectionMode.KeepStructure)
+				return;
+
+			string effectiveRootName = string.IsNullOrWhiteSpace(folderCollectionRootName)
+				? "YSP_Export"
+				: folderCollectionRootName.Trim();
+			PathRemapper remapper = new PathRemapper(settings.CollectionMode, effectiveRootName);
+			foreach (PackageAssetNode leaf in rootNode.EnumerateCheckedLeaves())
+			{
+				if (IsLeafExcluded(leaf))
+					continue;
+				exportPreviewItems.Add(new ExportPreviewItem
+				{
+					SourcePath = leaf.FullPath,
+					TargetPath = remapper.Remap(leaf.FullPath)
+				});
+			}
+		}
+
 		private void DrawTypeFilterTriState(string ext)
 		{
 			int total = 0, checkedCount = 0;
@@ -613,135 +705,6 @@ namespace YanK
 			EditorGUILayout.EndHorizontal();
 		}
 
-		// --- Folder Collection panel ---
-
-		private void DrawFolderCollectionPanel()
-		{
-			GUILayout.Space(2);
-			if (collectionPanelExpanded)
-				EditorGUILayout.BeginVertical(EditorStyles.helpBox, GUILayout.ExpandHeight(true));
-			else
-				EditorGUILayout.BeginVertical(EditorStyles.helpBox);
-
-			// Header with big Expand/Collapse icon button (Unity built-in icons, guaranteed to render)
-			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.LabelField(L("yspCollectionPanel", "Folder Organization"), EditorStyles.boldLabel);
-			GUILayout.FlexibleSpace();
-			GUIContent toggleIcon = collectionPanelExpanded
-				? EditorGUIUtility.IconContent("d_winbtn_win_restore")
-				: EditorGUIUtility.IconContent("d_winbtn_win_max");
-			if (toggleIcon == null || toggleIcon.image == null)
-				toggleIcon = new GUIContent(collectionPanelExpanded ? "-" : "+");
-			toggleIcon.tooltip = collectionPanelExpanded ? L("yspCollapse", "Collapse") : L("yspExpand", "Expand");
-			if (GUILayout.Button(toggleIcon, GUILayout.Width(36), GUILayout.Height(24)))
-				collectionPanelExpanded = !collectionPanelExpanded;
-			EditorGUILayout.EndHorizontal();
-
-			// Top Mode toolbar (label removed per request)
-			string[] topLabels = {
-				L("yspTopModeNone", "None"),
-				L("yspTopModeNonDestructive", "Non-Destructive (Copy)"),
-				L("yspTopModeDestructive", "Destructive (Move)")
-			};
-			int newTop = GUILayout.Toolbar((int)settings.TopMode, topLabels);
-			if (newTop != (int)settings.TopMode)
-			{
-				settings.TopMode = (FolderCollectionTopMode)newTop;
-				settings.Save();
-				RefreshPreview();
-			}
-
-			// Behaviour toolbar (disabled when TopMode == None)
-			EditorGUILayout.LabelField(L("yspFolderCollectionBehaviour", "Folder Layout"), EditorStyles.miniBoldLabel);
-			string[] behLabels = {
-				L("yspCollectionKeepStructure", "Keep Structure"),
-				L("yspCollectionAutoOrganize", "Auto Organize"),
-				L("yspCollectionSingleFolder", "Single Folder")
-			};
-			bool behaviourEnabled = settings.TopMode != FolderCollectionTopMode.None;
-			using (new EditorGUI.DisabledScope(!behaviourEnabled))
-			{
-				int newBeh = GUILayout.Toolbar((int)settings.CollectionMode, behLabels);
-				if (newBeh != (int)settings.CollectionMode)
-				{
-					settings.CollectionMode = (FolderCollectionMode)newBeh;
-					settings.Save();
-					RefreshPreview();
-				}
-			}
-
-			if (!behaviourEnabled)
-			{
-				EditorGUILayout.LabelField(L("yspFolderCollectionDisabled", "Choose Non-Destructive or Destructive to enable folder organization."), dimLabelStyle);
-				EditorGUILayout.EndVertical();
-				return;
-			}
-
-			string newRootName = EditorGUILayout.TextField(
-				L("yspCollectionRoot", "Root folder name"),
-				folderCollectionRootName);
-			if (newRootName != folderCollectionRootName)
-			{
-				folderCollectionRootName = newRootName;
-				RefreshPreview();
-			}
-
-			EditorGUILayout.BeginHorizontal();
-			if (GUILayout.Button(L("yspRefreshPreview", "Refresh Preview"), GUILayout.Width(140)))
-				RefreshPreview();
-			GUILayout.FlexibleSpace();
-			EditorGUILayout.LabelField(
-				previewPairs.Count == 0 ? L("yspPreviewEmpty", "(no preview)") : string.Format(L("yspPreviewCount", "{0} entries"), previewPairs.Count),
-				dimLabelStyle);
-			EditorGUILayout.EndHorizontal();
-
-			if (previewPairs.Count > 0)
-			{
-				if (collectionPanelExpanded)
-					previewScroll = EditorGUILayout.BeginScrollView(previewScroll, GUILayout.ExpandHeight(true));
-				else
-					previewScroll = EditorGUILayout.BeginScrollView(previewScroll, GUILayout.MaxHeight(140));
-				foreach (KeyValuePair<string, string> pair in previewPairs)
-				{
-					EditorGUILayout.BeginHorizontal();
-					EditorGUILayout.SelectableLabel(pair.Key, EditorStyles.miniLabel, GUILayout.Height(14), GUILayout.ExpandWidth(true));
-					EditorGUILayout.LabelField("→", GUILayout.Width(14));
-					EditorGUILayout.SelectableLabel(pair.Value, EditorStyles.miniLabel, GUILayout.Height(14), GUILayout.ExpandWidth(true));
-					EditorGUILayout.EndHorizontal();
-				}
-				EditorGUILayout.EndScrollView();
-			}
-
-			EditorGUILayout.EndVertical();
-		}
-
-		private void RefreshPreview()
-		{
-			previewPairs.Clear();
-			if (rootNode == null)
-				return;
-
-			if (settings.TopMode == FolderCollectionTopMode.None)
-			{
-				foreach (PackageAssetNode leaf in EnumerateLeaves(rootNode))
-				{
-					if (!leaf.IsChecked) continue;
-					if (IsLeafExcluded(leaf)) continue;
-					previewPairs.Add(new KeyValuePair<string, string>(leaf.FullPath, leaf.FullPath));
-				}
-				return;
-			}
-
-			PathRemapper remapper = new PathRemapper(settings.CollectionMode, folderCollectionRootName);
-			foreach (PackageAssetNode leaf in EnumerateLeaves(rootNode))
-			{
-				if (!leaf.IsChecked) continue;
-				if (IsLeafExcluded(leaf)) continue;
-				string orig = leaf.FullPath;
-				previewPairs.Add(new KeyValuePair<string, string>(orig, remapper.Remap(orig)));
-			}
-		}
-
 		// --- Export ---
 
 		private void DoExport()
@@ -764,9 +727,14 @@ namespace YanK
 				return;
 			}
 
-			long total = 0;
-			foreach (PackageAssetNode l in checkedLeaves)
-				total += l.FileSize;
+			if (!TryBuildExportPlan(checkedLeaves, out List<ExportPlanItem> exportPlan, out string preflightError))
+			{
+				EditorUtility.DisplayDialog(
+					L("yspExportPreflightTitle", "Export preflight failed"),
+					preflightError,
+					"OK");
+				return;
+			}
 
 			if (missingDependencies != null && missingDependencies.Length > 0)
 			{
@@ -778,67 +746,158 @@ namespace YanK
 			}
 
 			string startFolder = EditorPrefs.GetString(Prefs.LastExportFolder, Application.dataPath);
-			string defaultName = settings.TopMode == FolderCollectionTopMode.None
+			string defaultName = settings.CollectionMode == FolderCollectionMode.KeepStructure
 				? "YSP_Export_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss")
-				: folderCollectionRootName;
+				: string.IsNullOrWhiteSpace(folderCollectionRootName)
+					? "YSP_Export_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss")
+					: folderCollectionRootName.Trim();
 			string outPath = EditorUtility.SaveFilePanel(
 				L("yspExportPanelTitle", "Export Smart Package"),
 				startFolder, defaultName, "unitypackage");
 			if (string.IsNullOrEmpty(outPath))
 				return;
 
-			List<KeyValuePair<string, string>> mappings = new List<KeyValuePair<string, string>>(checkedLeaves.Count);
-			if (settings.TopMode == FolderCollectionTopMode.None)
-			{
-				foreach (PackageAssetNode leaf in checkedLeaves)
-					mappings.Add(new KeyValuePair<string, string>(leaf.FullPath, leaf.FullPath));
-			}
-			else
-			{
-				PathRemapper remapper = new PathRemapper(settings.CollectionMode, folderCollectionRootName);
-				foreach (PackageAssetNode leaf in checkedLeaves)
-					mappings.Add(new KeyValuePair<string, string>(leaf.FullPath, remapper.Remap(leaf.FullPath)));
-			}
-
-			if (settings.TopMode == FolderCollectionTopMode.None)
-			{
-				DoNonDestructiveExport(mappings, outPath);
-			}
-			else if (settings.TopMode == FolderCollectionTopMode.Destructive)
-				DoDestructiveExport(mappings, outPath);
-			else
-				DoNonDestructiveExport(mappings, outPath);
+			if (!DoNonDestructiveExport(exportPlan, outPath))
+				return;
 
 			EditorPrefs.SetString(Prefs.LastExportFolder, Path.GetDirectoryName(outPath));
 			EditorUtility.RevealInFinder(outPath);
 		}
 
-		private void DoNonDestructiveExport(List<KeyValuePair<string, string>> mappings, string outPath)
+		private bool TryBuildExportPlan(
+			List<PackageAssetNode> checkedLeaves,
+			out List<ExportPlanItem> exportPlan,
+			out string error)
 		{
-			List<UnityPackageEntry> entries = new List<UnityPackageEntry>(mappings.Count);
-			foreach (KeyValuePair<string, string> pair in mappings)
+			exportPlan = new List<ExportPlanItem>(checkedLeaves.Count);
+			error = null;
+
+			string effectiveRootName = string.IsNullOrWhiteSpace(folderCollectionRootName)
+				? "YSP_Export"
+				: folderCollectionRootName.Trim();
+			if (settings.CollectionMode != FolderCollectionMode.KeepStructure
+				&& (effectiveRootName.IndexOf('/') >= 0 || effectiveRootName.IndexOf('\\') >= 0))
 			{
-				string orig = pair.Key;
-				string remapped = pair.Value;
-				string absAsset = Path.GetFullPath(orig);
-				string absMeta = absAsset + ".meta";
-
-				if (!File.Exists(absAsset) || !File.Exists(absMeta))
-					continue;
-
-				byte[] assetBytes = File.ReadAllBytes(absAsset);
-				byte[] metaBytes = File.ReadAllBytes(absMeta);
-				string guid = GuidUtility.ExtractGuidFromMeta(metaBytes);
-				if (string.IsNullOrEmpty(guid))
-					continue;
-
-				entries.Add(new UnityPackageEntry
+				error = "The export root must be one folder name, not a nested path.";
+				return false;
+			}
+			if (settings.CollectionMode != FolderCollectionMode.KeepStructure)
+			{
+				string rootProbe = "Assets/" + effectiveRootName + "/__YSP_ROOT_VALIDATION__";
+				if (!ProjectPackagePath.TryNormalize(rootProbe, out _, out string rootError))
 				{
-					Guid = guid,
-					AssetPath = remapped,
-					AssetBytes = assetBytes,
-					MetaBytes = metaBytes
+					error = "Invalid export root folder.\n\n" + rootError;
+					return false;
+				}
+			}
+
+			string projectRoot = Path.GetDirectoryName(Application.dataPath);
+			PathRemapper remapper = new PathRemapper(settings.CollectionMode, effectiveRootName);
+			HashSet<string> targetPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			Dictionary<string, string> sourceByGuid = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+			List<string> errors = new List<string>();
+
+			foreach (PackageAssetNode leaf in checkedLeaves)
+			{
+				string sourcePath = leaf.FullPath;
+				string remapped = remapper.Remap(sourcePath);
+				if (!ProjectPackagePath.TryNormalize(remapped, out string normalizedTarget, out string targetError))
+				{
+					errors.Add(sourcePath + ": invalid export path. " + targetError);
+					continue;
+				}
+				if (!ProjectPackagePath.TryGetAbsolutePath(
+					projectRoot,
+					normalizedTarget,
+					out _,
+					out string targetAbsoluteError))
+				{
+					errors.Add(sourcePath + ": invalid export target. " + targetAbsoluteError);
+					continue;
+				}
+				if (!targetPaths.Add(normalizedTarget))
+				{
+					errors.Add(sourcePath + ": duplicate export path " + normalizedTarget);
+					continue;
+				}
+
+				if (!ProjectPackagePath.TryGetAbsolutePath(
+					projectRoot,
+					sourcePath,
+					out string absAsset,
+					out string sourceError))
+				{
+					errors.Add(sourcePath + ": " + sourceError);
+					continue;
+				}
+
+				string absMeta = absAsset + ".meta";
+				if (!File.Exists(absAsset))
+				{
+					errors.Add(sourcePath + ": asset file is missing.");
+					continue;
+				}
+				if (!File.Exists(absMeta))
+				{
+					errors.Add(sourcePath + ": meta file is missing.");
+					continue;
+				}
+
+				string guid;
+				try
+				{
+					guid = GuidUtility.ExtractGuidFromMeta(File.ReadAllBytes(absMeta));
+				}
+				catch (Exception ex)
+				{
+					errors.Add(sourcePath + ": could not read its meta file. " + ex.Message);
+					continue;
+				}
+				if (!GuidUtility.IsValidGuid(guid))
+				{
+					errors.Add(sourcePath + ": meta file has no valid GUID.");
+					continue;
+				}
+				if (sourceByGuid.TryGetValue(guid, out string firstGuidSource))
+				{
+					errors.Add(sourcePath + ": GUID " + guid + " is also used by " + firstGuidSource + ".");
+					continue;
+				}
+				sourceByGuid[guid] = sourcePath;
+
+				exportPlan.Add(new ExportPlanItem
+				{
+					SourcePath = sourcePath,
+					AbsoluteAssetPath = absAsset,
+					AbsoluteMetaPath = absMeta,
+					TargetPath = normalizedTarget,
+					ExpectedGuid = guid
 				});
+			}
+
+			if (errors.Count == 0)
+				return true;
+
+			const int maxDisplayedErrors = 12;
+			IEnumerable<string> displayedErrors = errors
+				.Take(maxDisplayedErrors)
+				.Select(item => "- " + item);
+			error = "Fix the following problems before exporting:\n\n"
+				+ string.Join("\n", displayedErrors.ToArray());
+			if (errors.Count > maxDisplayedErrors)
+				error += "\n- …and " + (errors.Count - maxDisplayedErrors) + " more.";
+			return false;
+		}
+
+		private bool DoNonDestructiveExport(List<ExportPlanItem> exportPlan, string outPath)
+		{
+			if (!TryLoadExportEntries(exportPlan, out List<UnityPackageEntry> entries, out string preflightError))
+			{
+				EditorUtility.DisplayDialog(
+					L("yspExportPreflightTitle", "Export preflight failed"),
+					preflightError,
+					"OK");
+				return false;
 			}
 
 			try
@@ -850,88 +909,108 @@ namespace YanK
 						string.Format(L("yspExportProgressMsg", "Writing {0} / {1}"), current, max),
 						max == 0 ? 0f : (float)current / max);
 				});
+				return true;
 			}
-			finally
-			{
-				EditorUtility.ClearProgressBar();
-			}
-		}
-
-		private void DoDestructiveExport(List<KeyValuePair<string, string>> mappings, string outPath)
-		{
-			if (!EditorUtility.DisplayDialog(
-				L("yspDestructiveConfirmTitle", "Move Project Assets"),
-				string.Format(L("yspDestructiveConfirmMsg", "Move {0} assets inside the project? This operation cannot be undone as a single batch."), mappings.Count),
-				L("yspContinue", "Continue"), L("yspCancel", "Cancel")))
-				return;
-
-			List<string> errors = new List<string>();
-			List<KeyValuePair<string, string>> moved = new List<KeyValuePair<string, string>>(mappings.Count);
-
-			AssetDatabase.StartAssetEditing();
-			try
-			{
-				for (int i = 0; i < mappings.Count; i++)
-				{
-					string orig = mappings[i].Key;
-					string remapped = mappings[i].Value;
-
-					EditorUtility.DisplayProgressBar(
-						L("yspMoveProgressTitle", "Moving…"),
-						string.Format(L("yspMoveProgressMsg", "{0} / {1}"), i + 1, mappings.Count),
-						mappings.Count == 0 ? 0f : (float)(i + 1) / mappings.Count);
-
-					string parent = Path.GetDirectoryName(remapped).Replace('\\', '/');
-					EnsureAssetFolder(parent);
-
-					string err = AssetDatabase.MoveAsset(orig, remapped);
-					if (!string.IsNullOrEmpty(err))
-						errors.Add(orig + " → " + remapped + ": " + err);
-					else
-						moved.Add(new KeyValuePair<string, string>(orig, remapped));
-				}
-			}
-			finally
-			{
-				AssetDatabase.StopAssetEditing();
-				EditorUtility.ClearProgressBar();
-			}
-
-			AssetDatabase.SaveAssets();
-
-			string[] remappedPaths = new string[moved.Count];
-			for (int i = 0; i < moved.Count; i++)
-				remappedPaths[i] = moved[i].Value;
-
-			// Honor the sidebar "Include Dependencies" toggle at the final export step too,
-			// so referenced assets aren't re-pulled when the user turned collection off.
-			ExportPackageOptions exportOptions = ExportPackageOptions.Recurse;
-			if (settings.IncludeDependencies)
-				exportOptions |= ExportPackageOptions.IncludeDependencies;
-			AssetDatabase.ExportPackage(remappedPaths, outPath, exportOptions);
-
-			if (errors.Count > 0)
+			catch (Exception ex)
 			{
 				EditorUtility.DisplayDialog(
-					L("yspDestructiveResultTitle", "Export Completed with Move Errors"),
-					string.Format(L("yspDestructiveResultMsg", "Moved {0} / failed {1}.\nFirst error: {2}"),
-						moved.Count, errors.Count, errors[0]),
+					L("yspExportFailedTitle", "Export failed"),
+					ex.Message,
 					"OK");
+				return false;
+			}
+			finally
+			{
+				EditorUtility.ClearProgressBar();
 			}
 		}
 
-		private static void EnsureAssetFolder(string assetFolderPath)
+		private bool TryLoadExportEntries(
+			List<ExportPlanItem> exportPlan,
+			out List<UnityPackageEntry> entries,
+			out string error)
 		{
-			if (string.IsNullOrEmpty(assetFolderPath)) return;
-			assetFolderPath = assetFolderPath.Replace('\\', '/');
-			if (assetFolderPath == "Assets") return;
-			if (AssetDatabase.IsValidFolder(assetFolderPath)) return;
+			entries = new List<UnityPackageEntry>(exportPlan.Count);
+			error = null;
+			string projectRoot = Path.GetDirectoryName(Application.dataPath);
 
-			string parent = Path.GetDirectoryName(assetFolderPath).Replace('\\', '/');
-			string leaf = Path.GetFileName(assetFolderPath);
-			if (!AssetDatabase.IsValidFolder(parent))
-				EnsureAssetFolder(parent);
-			AssetDatabase.CreateFolder(parent, leaf);
+			for (int i = 0; i < exportPlan.Count; i++)
+			{
+				ExportPlanItem item = exportPlan[i];
+				if (!ProjectPackagePath.TryNormalize(item.TargetPath, out string normalizedTarget, out string targetError))
+				{
+					error = item.SourcePath + ": invalid export path. " + targetError;
+					return false;
+				}
+
+				if (!ProjectPackagePath.TryGetAbsolutePath(
+					projectRoot,
+					item.SourcePath,
+					out string currentAssetPath,
+					out string sourceError))
+				{
+					error = item.SourcePath + ": " + sourceError;
+					return false;
+				}
+				string currentMetaPath = currentAssetPath + ".meta";
+				if (!string.Equals(currentAssetPath, item.AbsoluteAssetPath, StringComparison.OrdinalIgnoreCase)
+					|| !string.Equals(currentMetaPath, item.AbsoluteMetaPath, StringComparison.OrdinalIgnoreCase))
+				{
+					error = item.SourcePath + ": source path changed after preflight.";
+					return false;
+				}
+				if (!File.Exists(currentAssetPath))
+				{
+					error = item.SourcePath + ": asset file is missing.";
+					return false;
+				}
+				if (!File.Exists(currentMetaPath))
+				{
+					error = item.SourcePath + ": meta file is missing.";
+					return false;
+				}
+
+				byte[] assetBytes;
+				byte[] metaBytes;
+				try
+				{
+					assetBytes = File.ReadAllBytes(currentAssetPath);
+					metaBytes = File.ReadAllBytes(currentMetaPath);
+				}
+				catch (Exception ex)
+				{
+					error = item.SourcePath + ": could not read the asset or meta file. " + ex.Message;
+					return false;
+				}
+
+				string guid = GuidUtility.ExtractGuidFromMeta(metaBytes);
+				if (!GuidUtility.IsValidGuid(guid))
+				{
+					error = item.SourcePath + ": meta file has no valid GUID.";
+					return false;
+				}
+				if (!string.Equals(guid, item.ExpectedGuid, StringComparison.OrdinalIgnoreCase))
+				{
+					error = item.SourcePath + ": meta GUID changed after preflight.";
+					return false;
+				}
+
+				entries.Add(new UnityPackageEntry
+				{
+					Guid = guid,
+					MetaGuid = guid,
+					AssetPath = normalizedTarget,
+					AssetBytes = assetBytes,
+					MetaBytes = metaBytes,
+					EntryOrder = i,
+					HasAssetMember = true,
+					HasMetaMember = true,
+					HasPathnameMember = true,
+					Size = assetBytes.LongLength
+				});
+			}
+
+			return true;
 		}
 	}
 }

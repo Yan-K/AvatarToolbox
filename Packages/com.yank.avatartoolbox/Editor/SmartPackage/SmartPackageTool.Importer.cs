@@ -19,11 +19,24 @@ namespace YanK
 
 		// --- Background loading state ---
 		private readonly ConcurrentQueue<LoadedPackage> loadedQueue = new ConcurrentQueue<LoadedPackage>();
-		private readonly ConcurrentQueue<string> loadErrorQueue = new ConcurrentQueue<string>();
-		private readonly HashSet<string> inFlightPaths = new HashSet<string>();
+		private sealed class PackageLoadError
+		{
+			public string Path;
+			public string Error;
+			public int Generation;
+		}
+
+		private readonly ConcurrentQueue<PackageLoadError> loadErrorQueue = new ConcurrentQueue<PackageLoadError>();
+		private readonly HashSet<string> inFlightPaths = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
 		private SemaphoreSlim loadSemaphore;
 		private int pendingLoads;
 		private bool pollHooked;
+		private long nextPackageDropOrder;
+		private int loadGeneration;
+		private SnapshotAssetProbe importerProjectSnapshot;
+		private HashSet<string> importerContentUnknownPaths = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+		private bool dirtyTargetRefreshQueued;
+		private bool importQueued;
 
 		// Bumped whenever a checkbox changes in the importer; package tallies recompute
 		// lazily when their stored version no longer matches.
@@ -40,8 +53,11 @@ namespace YanK
 			// the semaphore is missing to avoid null dereferences in the load pipeline.
 			if (importerInitialized && loadSemaphore != null) return;
 			importerInitialized = true;
-			importerPolicy = (ConflictPolicy)EditorPrefs.GetInt(Prefs.ConflictPolicy, (int)ConflictPolicy.Ask);
-			loadSemaphore = new SemaphoreSlim(System.Math.Max(1, System.Environment.ProcessorCount));
+			int storedPolicy = EditorPrefs.GetInt(Prefs.ConflictPolicy, (int)ConflictPolicy.Ask);
+			importerPolicy = System.Enum.IsDefined(typeof(ConflictPolicy), storedPolicy)
+				? (ConflictPolicy)storedPolicy
+				: ConflictPolicy.Ask;
+			loadSemaphore = new SemaphoreSlim(System.Math.Max(1, System.Math.Min(4, System.Environment.ProcessorCount)));
 		}
 
 		private void DrawImporterTab()
@@ -77,7 +93,10 @@ namespace YanK
 			HandleListAreaDrop(listArea);
 
 			if (removeIndex >= 0)
+			{
 				loadedPackages.RemoveAt(removeIndex);
+				RefreshImporterConflictPreview(false);
+			}
 		}
 
 		private void DrawImporterEmptyHint()
@@ -139,7 +158,17 @@ namespace YanK
 			}
 
 			if (GUILayout.Button(L("yspClearPackages", "Clear"), EditorStyles.toolbarButton, GUILayout.Width(60)))
+			{
+				loadGeneration++;
 				loadedPackages.Clear();
+				inFlightPaths.Clear();
+				Interlocked.Exchange(ref pendingLoads, 0);
+				while (loadedQueue.TryDequeue(out _)) { }
+				while (loadErrorQueue.TryDequeue(out _)) { }
+				importerProjectSnapshot = null;
+				importerContentUnknownPaths.Clear();
+				importerHighlightNode = null;
+			}
 
 			using (new EditorGUI.DisabledScope(loadedPackages.Count == 0))
 			{
@@ -157,19 +186,13 @@ namespace YanK
 			{
 				importerPolicy = newPolicy;
 				EditorPrefs.SetInt(Prefs.ConflictPolicy, (int)importerPolicy);
+				RefreshImporterConflictPreview(false);
 			}
 
-			using (new EditorGUI.DisabledScope(loadedPackages.Count == 0 || pendingLoads > 0))
+			using (new EditorGUI.DisabledScope(loadedPackages.Count == 0 || pendingLoads > 0 || importQueued))
 			{
 				if (DrawColoredToolbarButton(L("yspImport", "Import…"), 90))
-				{
-					bool completed = ImportSession.Apply(loadedPackages, importerPolicy);
-					if (completed)
-					{
-						loadedPackages.Clear();
-						importerScroll = Vector2.zero;
-					}
-				}
+					QueueImport();
 			}
 
 			EditorGUILayout.EndHorizontal();
@@ -182,72 +205,62 @@ namespace YanK
 			if (paths == null) return;
 			EnsureImporterInit();
 
-			List<string> toLoad = new List<string>();
+			List<KeyValuePair<string, long>> toLoad = new List<KeyValuePair<string, long>>();
 			foreach (string path in paths)
 			{
 				if (string.IsNullOrEmpty(path))
 					continue;
+				string canonicalPath;
+				try { canonicalPath = Path.GetFullPath(path); }
+				catch (System.Exception) { continue; }
 				bool already = false;
 				foreach (LoadedPackage existing in loadedPackages)
 				{
-					if (existing.FilePath == path) { already = true; break; }
+					if (string.Equals(existing.FilePath, canonicalPath, System.StringComparison.OrdinalIgnoreCase)) { already = true; break; }
 				}
-				if (already || inFlightPaths.Contains(path))
+				if (already || inFlightPaths.Contains(canonicalPath))
 					continue;
-				inFlightPaths.Add(path);
-				toLoad.Add(path);
+				inFlightPaths.Add(canonicalPath);
+				toLoad.Add(new KeyValuePair<string, long>(canonicalPath, nextPackageDropOrder++));
 			}
 
 			if (toLoad.Count == 0)
 				return;
 
-			// Snapshot the project's GUID<->path map once on the main thread so the
-			// background conflict resolution stays free of Unity API calls.
-			SnapshotAssetProbe probe = SnapshotAssetProbe.Capture();
-
-			foreach (string path in toLoad)
+			foreach (KeyValuePair<string, long> pending in toLoad)
 			{
 				Interlocked.Increment(ref pendingLoads);
-				string capturedPath = path;
-				Task.Run(() => LoadPackageWorker(capturedPath, probe));
+				string capturedPath = pending.Key;
+				long capturedOrder = pending.Value;
+				int capturedGeneration = loadGeneration;
+				Task.Run(() => LoadPackageWorker(capturedPath, capturedOrder, capturedGeneration));
 			}
 
 			HookPoll();
 		}
 
-		// Runs off the main thread. No Unity API beyond the pre-captured probe.
-		private void LoadPackageWorker(string path, IAssetProbe probe)
+		// Runs off the main thread and performs archive/file IO only; no Unity API calls.
+		private void LoadPackageWorker(string path, long dropOrder, int generation)
 		{
 			loadSemaphore.Wait();
 			try
 			{
 				List<UnityPackageEntry> entries = UnityPackageReader.ReadMetadata(path);
 
-				Dictionary<string, ImportConflict> conflictByGuid = ImportConflictResolver.Resolve(entries, probe);
-
-				List<string> assetPaths = new List<string>(entries.Count);
-				Dictionary<string, ImportConflict> conflictByPath = new Dictionary<string, ImportConflict>(entries.Count);
-				foreach (UnityPackageEntry e in entries)
-				{
-					if (e == null || string.IsNullOrEmpty(e.AssetPath))
-						continue;
-					assetPaths.Add(e.AssetPath);
-					if (conflictByGuid.TryGetValue(e.Guid, out ImportConflict c))
-						conflictByPath[e.AssetPath] = c;
-				}
-
-				PackageAssetNode tree = PackageAssetNode.BuildTree(assetPaths);
+				PackageAssetNode tree = PackageAssetNode.BuildProjectTree(entries);
 				// Sort once off the main thread so per-frame drawing never re-sorts.
 				tree.SortChildrenRecursive();
 
 				LoadedPackage pkg = new LoadedPackage
 				{
 					FilePath = path,
+					DropOrder = dropOrder,
+					LoadGeneration = generation,
+					FileLength = new FileInfo(path).Length,
+					FileLastWriteUtcTicks = File.GetLastWriteTimeUtc(path).Ticks,
 					Entries = entries,
 					Tree = tree,
 					LeafCount = tree.CountLeaves(),
-					ConflictByGuid = conflictByGuid,
-					ConflictByPath = conflictByPath,
 					IsExpanded = true
 				};
 
@@ -255,7 +268,12 @@ namespace YanK
 			}
 			catch (System.Exception ex)
 			{
-				loadErrorQueue.Enqueue(path + "\n" + ex.Message);
+				loadErrorQueue.Enqueue(new PackageLoadError
+				{
+					Path = path,
+					Error = ex.ToString(),
+					Generation = generation
+				});
 			}
 			finally
 			{
@@ -272,10 +290,87 @@ namespace YanK
 
 		private void OnDisable()
 		{
+			// Background reads cannot be force-aborted safely. Invalidate their generation
+			// so any late completion is ignored instead of reviving a closed/cleared window.
+			loadGeneration++;
+			Interlocked.Exchange(ref pendingLoads, 0);
+			inFlightPaths.Clear();
+			while (loadedQueue.TryDequeue(out _)) { }
+			while (loadErrorQueue.TryDequeue(out _)) { }
 			if (pollHooked)
 			{
 				EditorApplication.update -= PollLoadQueue;
 				pollHooked = false;
+			}
+			EditorApplication.delayCall -= RefreshDirtyTargetsAfterFocus;
+			EditorApplication.delayCall -= RunQueuedImport;
+			dirtyTargetRefreshQueued = false;
+			importQueued = false;
+			ImportSession.ResetConflictWindowPosition();
+		}
+
+		private void OnFocus()
+		{
+			if (!importerInitialized || currentTab != SmartPackageTab.Importer || loadedPackages.Count == 0)
+				return;
+			QueueDirtyTargetRefresh();
+		}
+
+		private void QueueDirtyTargetRefresh()
+		{
+			if (dirtyTargetRefreshQueued)
+				return;
+			dirtyTargetRefreshQueued = true;
+			EditorApplication.delayCall += RefreshDirtyTargetsAfterFocus;
+		}
+
+		private void RefreshDirtyTargetsAfterFocus()
+		{
+			dirtyTargetRefreshQueued = false;
+			if (this == null || !importerInitialized || loadedPackages.Count == 0)
+				return;
+
+			bool saved = SnapshotAssetProbe.SaveDirtyTargets(
+				loadedPackages, out HashSet<string> unknownPaths);
+			bool unknownChanged = !importerContentUnknownPaths.SetEquals(unknownPaths);
+			if (!saved && !unknownChanged)
+				return;
+
+			importerContentUnknownPaths = unknownPaths;
+			RefreshImporterConflictPreview(true);
+			Repaint();
+		}
+
+		private void QueueImport()
+		{
+			if (importQueued)
+				return;
+			importQueued = true;
+			EditorApplication.delayCall += RunQueuedImport;
+		}
+
+		private void RunQueuedImport()
+		{
+			if (this == null)
+				return;
+			try
+			{
+				if (loadedPackages.Count == 0 || pendingLoads > 0)
+					return;
+				ImportRunResult importResult = ImportSession.Apply(loadedPackages, importerPolicy);
+				if (importResult.ShouldClear)
+				{
+					loadedPackages.Clear();
+					importerScroll = Vector2.zero;
+					importerHighlightNode = null;
+					importerProjectSnapshot = null;
+					importerContentUnknownPaths.Clear();
+				}
+			}
+			finally
+			{
+				importQueued = false;
+				Repaint();
 			}
 		}
 
@@ -285,6 +380,8 @@ namespace YanK
 
 			while (loadedQueue.TryDequeue(out LoadedPackage pkg))
 			{
+				if (pkg.LoadGeneration != loadGeneration)
+					continue;
 				inFlightPaths.Remove(pkg.FilePath);
 				bool already = false;
 				foreach (LoadedPackage existing in loadedPackages)
@@ -293,22 +390,28 @@ namespace YanK
 				}
 				if (!already)
 					loadedPackages.Add(pkg);
+				loadedPackages.Sort((a, b) => a.DropOrder.CompareTo(b.DropOrder));
 				Interlocked.Decrement(ref pendingLoads);
 				changed = true;
 			}
 
-			while (loadErrorQueue.TryDequeue(out string err))
+			while (loadErrorQueue.TryDequeue(out PackageLoadError err))
 			{
-				int nl = err.IndexOf('\n');
-				string failedPath = nl > 0 ? err.Substring(0, nl) : err;
-				inFlightPaths.Remove(failedPath);
+				if (err.Generation != loadGeneration)
+					continue;
+				inFlightPaths.Remove(err.Path);
 				Interlocked.Decrement(ref pendingLoads);
-				Debug.LogError("[YSP] Failed to read package:\n" + err);
+				Debug.LogError("[YSP] Failed to read package:\n" + err.Path + "\n" + err.Error);
 				changed = true;
 			}
 
 			if (changed)
+			{
+				SnapshotAssetProbe.SaveDirtyTargets(
+					loadedPackages, out importerContentUnknownPaths);
+				RefreshImporterConflictPreview(true);
 				Repaint();
+			}
 
 			if (pendingLoads <= 0 && loadedQueue.IsEmpty && loadErrorQueue.IsEmpty)
 			{
@@ -352,6 +455,39 @@ namespace YanK
 				loadedPackages[i].IsExpanded = expanded;
 		}
 
+		private void RefreshImporterConflictPreview(bool refreshProjectSnapshot)
+		{
+			if (loadedPackages.Count == 0)
+				return;
+			if (refreshProjectSnapshot || importerProjectSnapshot == null)
+				// Content fingerprints are loaded lazily and cached only for paths the
+				// packages actually touch. This lets the UI distinguish Identical from a
+				// real GUID Conflict without hashing the entire project.
+				importerProjectSnapshot = SnapshotAssetProbe.Capture(
+					includeContent: true,
+					contentUnknownPaths: importerContentUnknownPaths);
+
+			for (int i = 0; i < loadedPackages.Count; i++)
+			{
+				LoadedPackage package = loadedPackages[i];
+				package.ConflictByGuid.Clear();
+				package.ConflictByPath.Clear();
+				package.TallyVersion = -1;
+			}
+
+			ImportPlan preview = ImportPlanBuilder.Build(loadedPackages, importerProjectSnapshot, importerPolicy);
+			for (int i = 0; i < preview.OrderedItems.Count; i++)
+			{
+				ImportPlanItem item = preview.OrderedItems[i];
+				if (item.Package == null || item.Entry == null)
+					continue;
+				item.Package.ConflictByGuid[item.Entry.Guid] = item.Conflict;
+				item.Package.ConflictByPath[item.IncomingPath] = item.Conflict;
+			}
+
+			importerCheckVersion++;
+		}
+
 		// Recomputes a package's conflict / selected tallies (counting only CHECKED
 		// leaves) and the per-folder conflict flags, but only when the checked state
 		// has actually changed since the last computation.
@@ -363,22 +499,24 @@ namespace YanK
 				return;
 			pkg.TallyVersion = importerCheckVersion;
 
-			int guid = 0, path = 0, update = 0, selected = 0;
-			AggregateConflicts(pkg.Tree, pkg.ConflictByPath, ref guid, ref path, ref update, ref selected);
+			int guid = 0, path = 0, update = 0, duplicate = 0, selected = 0;
+			AggregateConflicts(pkg.Tree, pkg.ConflictByPath, ref guid, ref path, ref update, ref duplicate, ref selected);
 			pkg.GuidConflictCount = guid;
 			pkg.PathConflictCount = path;
 			pkg.UpdateCount = update;
+			pkg.DuplicateCount = duplicate;
 			pkg.SelectedCount = selected;
 		}
 
 		private static void AggregateConflicts(PackageAssetNode node, Dictionary<string, ImportConflict> map,
-			ref int guid, ref int path, ref int update, ref int selected)
+			ref int guid, ref int path, ref int update, ref int duplicate, ref int selected)
 		{
-			if (!node.IsFolder)
+			if (!node.IsFolder || (node.IsFolder && node.Children.Count == 0 && node.HasPackageEntry))
 			{
 				node.HasCheckedGuidConflict = false;
 				node.HasCheckedPathConflict = false;
 				node.HasCheckedUpdate = false;
+				node.HasCheckedDuplicate = false;
 				if (node.IsChecked)
 				{
 					selected++;
@@ -387,45 +525,62 @@ namespace YanK
 						if (c.Kind == ImportConflictKind.GuidConflict) { guid++; node.HasCheckedGuidConflict = true; }
 						else if (c.Kind == ImportConflictKind.PathConflict) { path++; node.HasCheckedPathConflict = true; }
 						else if (c.Kind == ImportConflictKind.Update) { update++; node.HasCheckedUpdate = true; }
+						else if (c.Kind == ImportConflictKind.Duplicate && !c.ExistingFromProject)
+						{
+							duplicate++;
+							node.HasCheckedDuplicate = true;
+						}
 					}
 				}
 				return;
 			}
 
-			bool folderGuid = false, folderPath = false, folderUpdate = false;
+			bool folderGuid = false, folderPath = false, folderUpdate = false, folderDuplicate = false;
 			List<PackageAssetNode> children = node.Children;
 			for (int i = 0; i < children.Count; i++)
 			{
 				PackageAssetNode child = children[i];
-				AggregateConflicts(child, map, ref guid, ref path, ref update, ref selected);
+				AggregateConflicts(child, map, ref guid, ref path, ref update, ref duplicate, ref selected);
 				folderGuid |= child.HasCheckedGuidConflict;
 				folderPath |= child.HasCheckedPathConflict;
 				folderUpdate |= child.HasCheckedUpdate;
+				folderDuplicate |= child.HasCheckedDuplicate;
+			}
+			// A non-empty folder can also carry its own package .meta record. It is
+			// implicitly selected whenever at least one descendant is selected, so expose
+			// its conflict on the folder badge without inflating the user-facing file count.
+			if (node.HasPackageEntry && node.GetState() != PackageAssetNode.ToggleState.Unchecked
+				&& map != null && map.TryGetValue(node.FullPath, out ImportConflict folderConflict))
+			{
+				folderGuid |= folderConflict.Kind == ImportConflictKind.GuidConflict;
+				folderPath |= folderConflict.Kind == ImportConflictKind.PathConflict;
+				folderUpdate |= folderConflict.Kind == ImportConflictKind.Update;
+				folderDuplicate |= folderConflict.Kind == ImportConflictKind.Duplicate
+					&& !folderConflict.ExistingFromProject;
 			}
 			node.HasCheckedGuidConflict = folderGuid;
 			node.HasCheckedPathConflict = folderPath;
 			node.HasCheckedUpdate = folderUpdate;
+			node.HasCheckedDuplicate = folderDuplicate;
 		}
 
-		// Always-visible conflict counts on the card header (independent of foldout).
+		// Always-visible project occupancy counts on the card header (independent of
+		// foldout). Internal planning keeps its detailed conflict kinds, while the UI
+		// deliberately presents only Identical package duplicates or GUID Conflict.
 		private void DrawPackageConflictTallies(LoadedPackage pkg)
 		{
 			if (pkg == null) return;
 
-			if (pkg.GuidConflictCount > 0)
+			int conflictCount = pkg.GuidConflictCount + pkg.PathConflictCount + pkg.UpdateCount;
+			if (conflictCount > 0)
 			{
-				string label = string.Format(L("yspGuidConflictCount", "{0} GUID conflict"), pkg.GuidConflictCount);
-				DrawTallyBadge(label, new Color(0.90f, 0.30f, 0.30f, 0.85f));
+				string label = string.Format(L("yspGuidConflictCount", "{0} GUID Conflict"), conflictCount);
+				DrawTallyBadge(label, new Color(0.85f, 0.20f, 0.20f, 0.90f));
 			}
-			if (pkg.PathConflictCount > 0)
+			if (pkg.DuplicateCount > 0)
 			{
-				string label = string.Format(L("yspPathConflictCount", "{0} path conflict"), pkg.PathConflictCount);
-				DrawTallyBadge(label, new Color(0.90f, 0.75f, 0.20f, 0.85f));
-			}
-			if (pkg.UpdateCount > 0)
-			{
-				string label = string.Format(L("yspUpdateCount", "{0} overwrite"), pkg.UpdateCount);
-				DrawTallyBadge(label, new Color(0.30f, 0.55f, 0.90f, 0.85f));
+				string label = string.Format(L("yspIdenticalCount", "{0} Identical"), pkg.DuplicateCount);
+				DrawTallyBadge(label, new Color(0.25f, 0.50f, 0.90f, 0.85f));
 			}
 		}
 

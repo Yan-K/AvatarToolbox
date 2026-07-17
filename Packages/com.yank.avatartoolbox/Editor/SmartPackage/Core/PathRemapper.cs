@@ -28,22 +28,14 @@ namespace YanK
 			switch (mode)
 			{
 				case FolderCollectionMode.KeepStructure:
-					return Reserve(BuildKeepStructure(normalized), reserve: false);
+					return normalized;
 				case FolderCollectionMode.AutoOrganize:
 					return Reserve(BuildAutoOrganize(normalized), reserve: true);
 				case FolderCollectionMode.SingleFolder:
 					return Reserve(BuildSingleFolder(normalized), reserve: true);
 				default:
-					return Reserve(BuildKeepStructure(normalized), reserve: false);
+					return normalized;
 			}
-		}
-
-		private string BuildKeepStructure(string normalized)
-		{
-			string relative = StripAssetsPrefix(normalized);
-			if (string.IsNullOrEmpty(relative))
-				relative = Path.GetFileName(normalized);
-			return "Assets/" + rootFolderName + "/" + relative;
 		}
 
 		private string BuildAutoOrganize(string normalized)
@@ -82,15 +74,6 @@ namespace YanK
 					return next;
 				n++;
 			}
-		}
-
-		private static string StripAssetsPrefix(string normalized)
-		{
-			if (normalized.StartsWith("Assets/", StringComparison.Ordinal))
-				return normalized.Substring("Assets/".Length);
-			if (normalized.Equals("Assets", StringComparison.Ordinal))
-				return string.Empty;
-			return normalized;
 		}
 
 		private static Dictionary<string, string> BuildBucketTable()
