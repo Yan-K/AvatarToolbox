@@ -897,45 +897,68 @@ namespace YanK
 		}
 
 		/// <summary>
-		/// Bake a blurred version of <paramref name="src"/> using multi-pass downsample/upsample
-		/// (cheap Gaussian approximation matching lilToon's Lod/Blur parameter).
-		/// <paramref name="lod"/> is lilToon's _MatCapLod range 0–10.
+		/// Bake a matcap texture: optional multi-pass blur (cheap Gaussian matching lilToon's Lod/Blur,
+		/// <paramref name="lod"/> = lilToon's _MatCapLod range 0–10) followed by an optional fade toward
+		/// white by <paramref name="multiplyStrength"/> (0–1). The fade recovers lilToon's Multiply
+		/// blend strength (_MatCapBlend × color.a): NonToon multiplies the base by lerp(1, tex·color,
+		/// mask), so pre-fading the texture toward white makes a reduced-alpha lilToon matcap stop
+		/// looking glossy. Blur and fade are baked into a SINGLE output asset (no orphan intermediate).
 		/// </summary>
-		private static Texture2D BakeBlurredTexture(Texture2D src, float lod, string folder, string nameNoExt)
+		private static Texture2D BakeMatCap(Texture2D src, float lod, float multiplyStrength,
+		                                     string folder, string nameNoExt)
 		{
-			if (src == null || lod <= 0.05f) return src;
+			if (src == null) return null;
 
 			var full = LoadFullResReadable(src);
 			int w = full.width, h = full.height;
 
-			// Map LOD 0-10 to blur passes 1-5 (each pass halves then doubles = 1 blur level).
-			int passes = Mathf.Clamp(Mathf.RoundToInt(lod * 0.5f), 1, 5);
+			Texture2D outTex = new Texture2D(w, h, TextureFormat.RGBA32, false);
 
-			var current = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
-			Graphics.Blit(full, current);
-
-			for (int i = 0; i < passes; i++)
+			if (lod > 0.05f)
 			{
-				int sw = Mathf.Max(1, w >> (i + 1)), sh = Mathf.Max(1, h >> (i + 1));
-				var smaller = RenderTexture.GetTemporary(sw, sh, 0, RenderTextureFormat.ARGB32);
-				Graphics.Blit(current, smaller);          // downsample → blurs via bilinear
+				// Map LOD 0-10 to blur passes 1-5 (each pass halves then doubles = 1 blur level).
+				int passes  = Mathf.Clamp(Mathf.RoundToInt(lod * 0.5f), 1, 5);
+				var current = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
+				Graphics.Blit(full, current);
+				for (int i = 0; i < passes; i++)
+				{
+					int sw = Mathf.Max(1, w >> (i + 1)), sh = Mathf.Max(1, h >> (i + 1));
+					var smaller = RenderTexture.GetTemporary(sw, sh, 0, RenderTextureFormat.ARGB32);
+					Graphics.Blit(current, smaller);          // downsample → blurs via bilinear
+					RenderTexture.ReleaseTemporary(current);
+					current = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
+					Graphics.Blit(smaller, current);          // upsample → soft blur
+					RenderTexture.ReleaseTemporary(smaller);
+				}
+				var prev = RenderTexture.active;
+				RenderTexture.active = current;
+				outTex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
+				outTex.Apply();
+				RenderTexture.active = prev;
 				RenderTexture.ReleaseTemporary(current);
-				current = RenderTexture.GetTemporary(w, h, 0, RenderTextureFormat.ARGB32);
-				Graphics.Blit(smaller, current);           // upsample → soft blur
-				RenderTexture.ReleaseTemporary(smaller);
+			}
+			else
+			{
+				outTex.SetPixels(full.GetPixels());
+				outTex.Apply();
 			}
 
-			var prev   = RenderTexture.active;
-			RenderTexture.active = current;
-			var outTex = new Texture2D(w, h, TextureFormat.RGBA32, false);
-			outTex.ReadPixels(new Rect(0, 0, w, h), 0, 0);
-			outTex.Apply();
-			RenderTexture.active = prev;
-			RenderTexture.ReleaseTemporary(current);
+			// Fade toward white by strength (Multiply matcaps only — caller passes 1 otherwise).
+			if (multiplyStrength < 0.996f)
+			{
+				float s   = Mathf.Clamp01(multiplyStrength);
+				var   px  = outTex.GetPixels();
+				for (int i = 0; i < px.Length; i++)
+					px[i] = new Color(Mathf.Lerp(1f, px[i].r, s),
+					                  Mathf.Lerp(1f, px[i].g, s),
+					                  Mathf.Lerp(1f, px[i].b, s), 1f);
+				outTex.SetPixels(px);
+				outTex.Apply();
+			}
 
 			if (full != null && full != src) Object.DestroyImmediate(full);
 
-			var saved = SaveTexturePng(outTex, folder, nameNoExt + "_Blur_NTBake");
+			var saved = SaveTexturePng(outTex, folder, nameNoExt + "_MatCap_NTBake");
 			if (saved != null) CopyImportSettings(src, saved, asNormal: false);
 			return saved;
 		}
