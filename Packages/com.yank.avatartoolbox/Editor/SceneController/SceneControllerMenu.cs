@@ -60,7 +60,7 @@ namespace YanK
 
 			var sb = new StringBuilder();
 			sb.AppendLine(YanKLocalization.L("scScanIntro",
-				"These Cameras exist in your scene and may interfere with Scene Controller. Disable them now?"));
+				"These cameras are present in the scene and may interfere with Scene Controller. Disable them now?"));
 			sb.AppendLine();
 			foreach (var c in cams) sb.AppendLine("  • " + c.name);
 
@@ -114,7 +114,7 @@ namespace YanK
 
 			var sb = new StringBuilder();
 			sb.AppendLine(YanKLocalization.L("scScanLightsIntro",
-				"These Lights exist in your scene outside any avatar. Disable them so Scene Controller's lighting rig isn't overpowered?"));
+				"These lights are outside all avatars and may overpower Scene Controller's lighting rig. Disable them now?"));
 			sb.AppendLine();
 			foreach (var l in lights) sb.AppendLine("  • " + l.name);
 

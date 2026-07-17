@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
@@ -14,6 +15,17 @@ namespace YanK
 	public static class YanKLocalization
 	{
 		private const string LocalizationFolder = "YATLocalization";
+		private const string LanguageCatalogChunk = "Shared";
+		private static readonly string[] LocalizationChunks =
+		{
+			LanguageCatalogChunk,
+			"MaterialEditor",
+			"BlendshapeEditor",
+			"SceneController",
+			"SmartPackage",
+			"NonToonConverter"
+		};
+
 		internal const string LanguagePrefKey = "YAT_Language";
 
 		private static readonly List<string> _languages = new List<string>();
@@ -85,8 +97,11 @@ namespace YanK
 		private static void RefreshLanguageFiles()
 		{
 			_languages.Clear();
-			foreach (var file in Resources.LoadAll<TextAsset>(LocalizationFolder))
-				_languages.Add(Path.GetFileNameWithoutExtension(file.name));
+			foreach (var file in Resources.LoadAll<TextAsset>($"{LocalizationFolder}/{LanguageCatalogChunk}"))
+			{
+				string language = Path.GetFileNameWithoutExtension(file.name);
+				if (!_languages.Contains(language)) _languages.Add(language);
+			}
 
 			if (!_languages.Contains("English"))
 				_languages.Insert(0, "English");
@@ -98,11 +113,38 @@ namespace YanK
 			if (_languages.Count == 0) return;
 
 			string lang = _languages[_selectedIndex];
-			var jsonFile = Resources.Load<TextAsset>($"{LocalizationFolder}/{lang}");
-			if (jsonFile != null)
+			// English is the canonical fallback for any key omitted by another language.
+			MergeLanguage("English", _strings, lang == "English");
+			if (lang != "English") MergeLanguage(lang, _strings, true);
+		}
+
+		private static void MergeLanguage(string language, Dictionary<string, string> destination, bool reportMissingChunks)
+		{
+			var languageKeys = new HashSet<string>();
+
+			foreach (string chunk in LocalizationChunks)
 			{
-				try { _strings = LocalizationParser.Parse(jsonFile.text); }
-				catch { Debug.LogError($"Failed to parse localization file: {lang}"); }
+				var jsonFile = Resources.Load<TextAsset>($"{LocalizationFolder}/{chunk}/{language}");
+				if (jsonFile == null)
+				{
+					if (reportMissingChunks)
+						Debug.LogWarning($"Localization chunk not found: {chunk}/{language}");
+					continue;
+				}
+
+				try
+				{
+					foreach (var entry in LocalizationParser.Parse(jsonFile.text))
+					{
+						if (!languageKeys.Add(entry.Key))
+							Debug.LogError($"Duplicate localization key '{entry.Key}' in language '{language}'.");
+						destination[entry.Key] = entry.Value;
+					}
+				}
+				catch (Exception exception)
+				{
+					Debug.LogError($"Failed to parse localization chunk {chunk}/{language}: {exception.Message}");
+				}
 			}
 		}
 	}

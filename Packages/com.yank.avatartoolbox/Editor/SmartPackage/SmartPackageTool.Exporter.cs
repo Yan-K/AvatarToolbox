@@ -625,7 +625,7 @@ namespace YanK
 
 			// Header with big Expand/Collapse icon button (Unity built-in icons, guaranteed to render)
 			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.LabelField(L("yspCollectionPanel", "Folder Collection"), EditorStyles.boldLabel);
+			EditorGUILayout.LabelField(L("yspCollectionPanel", "Folder Organization"), EditorStyles.boldLabel);
 			GUILayout.FlexibleSpace();
 			GUIContent toggleIcon = collectionPanelExpanded
 				? EditorGUIUtility.IconContent("d_winbtn_win_restore")
@@ -640,8 +640,8 @@ namespace YanK
 			// Top Mode toolbar (label removed per request)
 			string[] topLabels = {
 				L("yspTopModeNone", "None"),
-				L("yspTopModeNonDestructive", "Non-Destructive"),
-				L("yspTopModeDestructive", "Destructive")
+				L("yspTopModeNonDestructive", "Non-Destructive (Copy)"),
+				L("yspTopModeDestructive", "Destructive (Move)")
 			};
 			int newTop = GUILayout.Toolbar((int)settings.TopMode, topLabels);
 			if (newTop != (int)settings.TopMode)
@@ -652,7 +652,7 @@ namespace YanK
 			}
 
 			// Behaviour toolbar (disabled when TopMode == None)
-			EditorGUILayout.LabelField(L("yspFolderCollectionBehaviour", "Behaviour"), EditorStyles.miniBoldLabel);
+			EditorGUILayout.LabelField(L("yspFolderCollectionBehaviour", "Folder Layout"), EditorStyles.miniBoldLabel);
 			string[] behLabels = {
 				L("yspCollectionKeepStructure", "Keep Structure"),
 				L("yspCollectionAutoOrganize", "Auto Organize"),
@@ -672,7 +672,7 @@ namespace YanK
 
 			if (!behaviourEnabled)
 			{
-				EditorGUILayout.LabelField(L("yspFolderCollectionDisabled", "Top Mode is None — folder collection is disabled."), dimLabelStyle);
+				EditorGUILayout.LabelField(L("yspFolderCollectionDisabled", "Choose Non-Destructive or Destructive to enable folder organization."), dimLabelStyle);
 				EditorGUILayout.EndVertical();
 				return;
 			}
@@ -860,8 +860,8 @@ namespace YanK
 		private void DoDestructiveExport(List<KeyValuePair<string, string>> mappings, string outPath)
 		{
 			if (!EditorUtility.DisplayDialog(
-				L("yspDestructiveConfirmTitle", "Destructive Folder Collection"),
-				string.Format(L("yspDestructiveConfirmMsg", "Move {0} assets in project? This cannot be batch-undone."), mappings.Count),
+				L("yspDestructiveConfirmTitle", "Move Project Assets"),
+				string.Format(L("yspDestructiveConfirmMsg", "Move {0} assets inside the project? This operation cannot be undone as a single batch."), mappings.Count),
 				L("yspContinue", "Continue"), L("yspCancel", "Cancel")))
 				return;
 
@@ -913,7 +913,7 @@ namespace YanK
 			if (errors.Count > 0)
 			{
 				EditorUtility.DisplayDialog(
-					L("yspDestructiveResultTitle", "Destructive export completed with errors"),
+					L("yspDestructiveResultTitle", "Export Completed with Move Errors"),
 					string.Format(L("yspDestructiveResultMsg", "Moved {0} / failed {1}.\nFirst error: {2}"),
 						moved.Count, errors.Count, errors[0]),
 					"OK");

@@ -258,7 +258,7 @@ namespace YanK
 				string.Format(L("bseRemapTitle", "Remap Missing Blendshapes ({0})"), visible.Count),
 				EditorStyles.boldLabel);
 
-			if (GUILayout.Button(L("bseRemapAutoMatch", "Auto-match by Fuzzy Name"), GUILayout.Height(20)))
+			if (GUILayout.Button(L("bseRemapAutoMatch", "Auto-match Similar Names"), GUILayout.Height(20)))
 			{
 				AutoMatchRemap();
 				if (inPreview) ApplyPreview();

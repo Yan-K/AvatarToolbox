@@ -1,0 +1,16 @@
+﻿{
+    "usedBy": "{0}個のレンダラーで使用中",
+    "filterStatus": "{0} / {1} 表示中",
+    "updateButton": "更新",
+    "updateButtonTooltip": "新しいバージョンがあります。クリックしてダウンロード方法を確認してください。",
+    "updateDialogTitle": "アップデートがあります",
+    "updateDownloadPrompt": "アップデートのダウンロード先を選択してください：",
+    "updateSourceBooth": "Booth",
+    "updateSourceVcc": "VCC / ALCOM",
+    "updateSourceGitHub": "GitHub",
+    "updateSkip": "このアップデートをスキップ",
+    "updateSkipConfirmTitle": "アップデートをスキップ",
+    "updateSkipConfirmMessage": "次のリリースまでアップデート通知が非表示になります。スキップしますか？",
+    "updateSkipConfirmYes": "はい、スキップする",
+    "updateSkipConfirmNo": "いいえ、通知を続ける"
+}

@@ -16,7 +16,7 @@ namespace YanK
 		public static void ShowPopup()
 		{
 			var w = CreateInstance<YanKUpdatePopup>();
-			w.titleContent = new GUIContent(YanKLocalization.L("ncUpdateTitle", "Update Available"));
+			w.titleContent = new GUIContent(YanKLocalization.L("updateDialogTitle", "Update Available"));
 			w.minSize = new Vector2(340, 300);
 			w.maxSize = new Vector2(340, 300);
 			w.ShowUtility();
@@ -31,7 +31,7 @@ namespace YanK
 				fontSize  = 15,
 				alignment = TextAnchor.MiddleCenter
 			};
-			GUILayout.Label(YanKLocalization.L("ncUpdateTitle", "Update Available"), titleStyle, GUILayout.ExpandWidth(true));
+			GUILayout.Label(YanKLocalization.L("updateDialogTitle", "Update Available"), titleStyle, GUILayout.ExpandWidth(true));
 
 			var versionStyle = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleCenter };
 			string cur    = YanKUpdateChecker.CurrentVersion ?? "?";
@@ -40,25 +40,25 @@ namespace YanK
 
 			GUILayout.Space(14);
 			var wrapCenter = new GUIStyle(EditorStyles.wordWrappedLabel) { alignment = TextAnchor.MiddleCenter };
-			GUILayout.Label(YanKLocalization.L("ncUpdateVia", "Choose where to download the update:"), wrapCenter, GUILayout.ExpandWidth(true));
+			GUILayout.Label(YanKLocalization.L("updateDownloadPrompt", "Choose where to download the update:"), wrapCenter, GUILayout.ExpandWidth(true));
 			GUILayout.Space(8);
 
-			DrawLinkCard(YanKLocalization.L("ncUpdateBooth", "Booth"), new Color(1f, 0.6f, 0.15f), BoothUrl);
+			DrawLinkCard(YanKLocalization.L("updateSourceBooth", "Booth"), new Color(1f, 0.6f, 0.15f), BoothUrl);
 			GUILayout.Space(6);
-			DrawLinkCard(YanKLocalization.L("ncUpdateVCC", "VCC / ALCOM"), new Color(0.25f, 0.55f, 0.95f), VccUrl);
+			DrawLinkCard(YanKLocalization.L("updateSourceVcc", "VCC / ALCOM"), new Color(0.25f, 0.55f, 0.95f), VccUrl);
 			GUILayout.Space(6);
-			DrawLinkCard(YanKLocalization.L("ncUpdateGithub", "GitHub"), new Color(0.35f, 0.35f, 0.35f), GithubUrl);
+			DrawLinkCard(YanKLocalization.L("updateSourceGitHub", "GitHub"), new Color(0.35f, 0.35f, 0.35f), GithubUrl);
 
 			GUILayout.FlexibleSpace();
 
-			if (GUILayout.Button(YanKLocalization.L("ncUpdateSkip", "Skip this update"), EditorStyles.linkLabel))
+			if (GUILayout.Button(YanKLocalization.L("updateSkip", "Skip this update"), EditorStyles.linkLabel))
 			{
 				bool confirm = EditorUtility.DisplayDialog(
-					YanKLocalization.L("ncUpdateSkipConfirmTitle", "Skip Update"),
-					YanKLocalization.L("ncUpdateSkipConfirm",
+					YanKLocalization.L("updateSkipConfirmTitle", "Skip Update"),
+					YanKLocalization.L("updateSkipConfirmMessage",
 						"This will hide the update notice until the next release. Skip this update?"),
-					YanKLocalization.L("ncUpdateSkipConfirmYes", "Yes, Skip"),
-					YanKLocalization.L("ncUpdateSkipConfirmNo", "No, Keep Reminding"));
+					YanKLocalization.L("updateSkipConfirmYes", "Yes, Skip"),
+					YanKLocalization.L("updateSkipConfirmNo", "No, Keep Reminding"));
 
 				if (confirm)
 				{

@@ -90,7 +90,7 @@ namespace YanK
 			{
 				EditorGUILayout.HelpBox(
 					YanKLocalization.L("scCamOffHint",
-						"Off: SceneController will not read input or write the camera transform.\nUse this when you want another tool to fully control the camera."),
+						"Off: Scene Controller will not read input or modify the camera transform.\nUse this when another tool should have full control of the camera."),
 					MessageType.Info);
 				return;
 			}
@@ -118,7 +118,7 @@ namespace YanK
 			{
 				EditorGUI.BeginChangeCheck();
 				float newDist = EditorGUILayout.Slider(YanKLocalization.L("scDistance", "Distance"), sc.cameraDistance, 0.2f, 20f);
-				float newYaw = EditorGUILayout.Slider(YanKLocalization.L("scYaw", "Rotation (Yaw)"), sc.cameraYaw, -180f, 180f);
+				float newYaw = EditorGUILayout.Slider(YanKLocalization.L("scYaw", "Yaw"), sc.cameraYaw, -180f, 180f);
 				float newPitch = EditorGUILayout.Slider(YanKLocalization.L("scPitch", "Pitch"), sc.cameraPitch, -89f, 89f);
 				if (EditorGUI.EndChangeCheck())
 				{
@@ -140,7 +140,7 @@ namespace YanK
 		{
 			using (new EditorGUI.DisabledScope(sc.boneTargetOverride != null || sc.avatarRoot == null))
 			{
-				EditorGUILayout.LabelField(YanKLocalization.L("scBoneTarget", "Inspect Bone"));
+				EditorGUILayout.LabelField(YanKLocalization.L("scBoneTarget", "Bone to Inspect"));
 				int curBone = (int)sc.boneTarget;
 				int r1Sel = curBone < 5 ? curBone : -1;
 				int r2Sel = curBone >= 5 ? curBone - 5 : -1;

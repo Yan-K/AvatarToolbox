@@ -7,7 +7,7 @@ namespace YanK
 	public partial class BlendshapeEditorTool : YanKEditorWindow
 	{
 		protected override string ToolTitleKey => "bseTitle";
-		protected override string ToolTitleDefault => "Yan-K Blendshape Editor (YBE)";
+		protected override string ToolTitleDefault => "Yan-K Blendshape Editor";
 
 		private enum AnimTab { Import, Export }
 
@@ -52,7 +52,7 @@ namespace YanK
 		[MenuItem("Tools/Yan-K/Blendshape Editor")]
 		public static void ShowWindow()
 		{
-			GetWindow<BlendshapeEditorTool>("Yan-K Blendshape");
+			GetWindow<BlendshapeEditorTool>("Yan-K Blendshape Editor");
 		}
 
 		protected override void OnEnable()
@@ -142,7 +142,7 @@ namespace YanK
 
 			// Row 3: SMR (X button always visible, no Rescan button)
 			EditorGUILayout.BeginHorizontal();
-			EditorGUILayout.LabelField(L("bseSMR", "Skinned Mesh"), EditorStyles.boldLabel, GUILayout.Width(100));
+			EditorGUILayout.LabelField(L("bseSMR", "Skinned Mesh Renderer"), EditorStyles.boldLabel, GUILayout.Width(100));
 			var newSMR = (SkinnedMeshRenderer)EditorGUILayout.ObjectField(targetRenderer, typeof(SkinnedMeshRenderer), true);
 			GUI.enabled = targetRenderer != null;
 			if (GUILayout.Button("✕", GUILayout.Width(22), GUILayout.Height(18)))
@@ -196,4 +196,3 @@ namespace YanK
 		}
 	}
 }
-

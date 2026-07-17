@@ -31,7 +31,7 @@ namespace YanK
 		[MenuItem("Tools/Yan-K/Smart Package")]
 		public static void ShowWindow()
 		{
-			GetWindow<SmartPackageTool>("Smart Package");
+			GetWindow<SmartPackageTool>("Yan-K Smart Package");
 		}
 
 		private void OnGUI()

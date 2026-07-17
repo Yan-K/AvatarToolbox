@@ -1,0 +1,16 @@
+﻿{
+    "usedBy": "有 {0} 個渲染器使用中",
+    "filterStatus": "顯示 {0} / {1}",
+    "updateButton": "更新",
+    "updateButtonTooltip": "有新版本可用。點擊查看下載選項。",
+    "updateDialogTitle": "有可用更新",
+    "updateDownloadPrompt": "請選擇更新的下載來源：",
+    "updateSourceBooth": "Booth",
+    "updateSourceVcc": "VCC / ALCOM",
+    "updateSourceGitHub": "GitHub",
+    "updateSkip": "略過此次更新",
+    "updateSkipConfirmTitle": "略過更新",
+    "updateSkipConfirmMessage": "這將隱藏更新提示，直到下一個版本發布。確定要略過此次更新嗎？",
+    "updateSkipConfirmYes": "是，略過",
+    "updateSkipConfirmNo": "否，繼續提醒"
+}

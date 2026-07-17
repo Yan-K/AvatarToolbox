@@ -1,0 +1,16 @@
+﻿{
+    "usedBy": "Used by {0} renderer(s)",
+    "filterStatus": "{0} of {1} shown",
+    "updateButton": "Update",
+    "updateButtonTooltip": "A newer version is available. Click for download options.",
+    "updateDialogTitle": "Update Available",
+    "updateDownloadPrompt": "Choose where to download the update:",
+    "updateSourceBooth": "Booth",
+    "updateSourceVcc": "VCC / ALCOM",
+    "updateSourceGitHub": "GitHub",
+    "updateSkip": "Skip this update",
+    "updateSkipConfirmTitle": "Skip Update",
+    "updateSkipConfirmMessage": "This will hide the update notice until the next release. Skip this update?",
+    "updateSkipConfirmYes": "Yes, Skip",
+    "updateSkipConfirmNo": "No, Keep Reminding"
+}

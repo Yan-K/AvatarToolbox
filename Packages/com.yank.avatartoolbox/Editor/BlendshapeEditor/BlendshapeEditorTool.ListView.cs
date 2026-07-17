@@ -47,7 +47,7 @@ namespace YanK
 				EditorGUILayout.BeginHorizontal();
 				int selCount = CountSelected();
 				EditorGUILayout.LabelField(
-					string.Format(L("bseBatchSliderCount", "Batch Value ({0})"), selCount),
+					string.Format(L("bseBatchSliderCount", "Batch Value ({0} selected)"), selCount),
 					GUILayout.Width(140));
 
 				bool canDrag = !inPreview && selCount > 0 && targetRenderer != null;

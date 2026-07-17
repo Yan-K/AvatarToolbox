@@ -300,7 +300,7 @@ namespace YanK
 			switch (kind)
 			{
 				case ImportConflictKind.New: return L("yspConflictNew", "New");
-				case ImportConflictKind.Update: return L("yspConflictUpdate", "Existed");
+				case ImportConflictKind.Update: return L("yspConflictUpdate", "Existing");
 				case ImportConflictKind.PathConflict: return L("yspConflictPath", "Path conflict");
 				case ImportConflictKind.GuidConflict: return L("yspConflictGuid", "GUID conflict");
 				default: return kind.ToString();

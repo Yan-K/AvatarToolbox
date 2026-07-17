@@ -2,7 +2,6 @@ using UnityEngine;
 using UnityEditor;
 using System;
 using System.Collections.Generic;
-using System.IO;
 
 namespace YanK
 {
@@ -12,8 +11,6 @@ namespace YanK
 
 		protected abstract string ToolTitleKey { get; }
 		protected abstract string ToolTitleDefault { get; }
-
-		protected virtual string LocalizationFolder => "YATLocalization";
 
 		// --- Spacing Constants ---
 
@@ -36,7 +33,6 @@ namespace YanK
 
 		protected readonly List<string> availableLanguages = new List<string>();
 		protected int selectedLanguageIndex;
-		protected Dictionary<string, string> localizedStrings = new Dictionary<string, string>();
 
 		protected virtual void OnEnable()
 		{
@@ -229,45 +225,25 @@ namespace YanK
 		private void RefreshLanguageFiles()
 		{
 			availableLanguages.Clear();
-
-			foreach (var file in Resources.LoadAll<TextAsset>(LocalizationFolder))
-				availableLanguages.Add(Path.GetFileNameWithoutExtension(file.name));
-
-			if (!availableLanguages.Contains("English"))
-				availableLanguages.Insert(0, "English");
+			foreach (string language in YanKLocalization.Languages)
+				availableLanguages.Add(language);
 		}
 
 		private void LoadDefaultLanguage()
 		{
-			selectedLanguageIndex = EditorPrefs.GetInt(YanKLocalization.LanguagePrefKey, availableLanguages.IndexOf("English"));
-			if (selectedLanguageIndex < 0 || selectedLanguageIndex >= availableLanguages.Count)
-				selectedLanguageIndex = 0;
+			selectedLanguageIndex = YanKLocalization.SelectedIndex;
 		}
 
 		private void LoadLocalizedStrings()
 		{
-			localizedStrings.Clear();
 			if (availableLanguages.Count == 0) return;
-
-			string lang = availableLanguages[selectedLanguageIndex];
-			var jsonFile = Resources.Load<TextAsset>($"{LocalizationFolder}/{lang}");
-
-			if (jsonFile != null)
-			{
-				try { localizedStrings = LocalizationParser.Parse(jsonFile.text); }
-				catch { Debug.LogError($"Failed to parse localization file: {lang}"); }
-			}
-			else
-			{
-				Debug.LogWarning($"Localization file for {lang} not found.");
-			}
-
+			YanKLocalization.SelectedIndex = selectedLanguageIndex;
 			Repaint();
 		}
 
 		protected string L(string key, string defaultValue)
 		{
-			return localizedStrings.TryGetValue(key, out string value) ? value : defaultValue;
+			return YanKLocalization.L(key, defaultValue);
 		}
 	}
 }

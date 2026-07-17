@@ -10,7 +10,7 @@ namespace YanK
 	public partial class NonToonConverterTool : YanKEditorWindow
 	{
 		protected override string ToolTitleKey    => "ncTitle";
-		protected override string ToolTitleDefault => "NonToon Converter";
+		protected override string ToolTitleDefault => "Yan-K NonToon Converter";
 
 		[MenuItem("Tools/Yan-K/NonToon Converter")]
 		public static void ShowWindow() =>

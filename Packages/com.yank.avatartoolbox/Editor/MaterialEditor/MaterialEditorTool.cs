@@ -9,7 +9,7 @@ namespace YanK
 	public partial class MaterialEditorTool : YanKEditorWindow
 	{
 		protected override string ToolTitleKey => "ymeTitle";
-		protected override string ToolTitleDefault => "Yan-K Material Editor (YME)";
+		protected override string ToolTitleDefault => "Yan-K Material Editor";
 
 		// Single source of truth for the YME include-inactive EditorPref key.
 		private const string IncludeInactivePrefKey = "YME_IncludeInactive";
@@ -32,7 +32,7 @@ namespace YanK
 		[MenuItem("Tools/Yan-K/Material Editor")]
 		public static void ShowWindow()
 		{
-			GetWindow<MaterialEditorTool>("Yan-K Material");
+			GetWindow<MaterialEditorTool>("Yan-K Material Editor");
 		}
 
 		protected override void OnEnable()

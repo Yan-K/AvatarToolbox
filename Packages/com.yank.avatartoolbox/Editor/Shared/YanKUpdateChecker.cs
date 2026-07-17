@@ -150,8 +150,8 @@ namespace YanK
 			GUI.backgroundColor = new Color(1f, 0.82f, 0.15f);
 			if (GUILayout.Button(
 				new GUIContent(
-					YanKLocalization.L("ncUpdate", "Update"),
-					YanKLocalization.L("ncUpdateTooltip", "A newer version is available. Click for download options.")),
+					YanKLocalization.L("updateButton", "Update"),
+					YanKLocalization.L("updateButtonTooltip", "A newer version is available. Click for download options.")),
 				EditorStyles.miniButton, GUILayout.Width(64)))
 			{
 				YanKUpdatePopup.ShowPopup();

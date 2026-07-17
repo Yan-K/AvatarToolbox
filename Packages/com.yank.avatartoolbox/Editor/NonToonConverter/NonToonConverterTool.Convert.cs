@@ -120,7 +120,7 @@ namespace YanK
 			Undo.CollapseUndoOperations(undoGroup);
 			string doneMessage = string.Format(L("ncConvertDone", "Converted {0} material(s). {1} failed."), succeeded, failed);
 			if (skippedFur > 0)
-				doneMessage += "\n" + string.Format(L("ncConvertSkippedFur", "{0} Fur material(s) skipped (Convert Fur is off — left as lilToon)."), skippedFur);
+				doneMessage += "\n" + string.Format(L("ncConvertSkippedFur", "Skipped Fur materials: {0} (Convert Fur is off; they remain lilToon)."), skippedFur);
 			EditorUtility.DisplayDialog(L("ncConvertDoneTitle", "Conversion Complete"), doneMessage, "OK");
 
 			if (failed == 0)

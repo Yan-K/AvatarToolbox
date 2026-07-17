@@ -19,7 +19,7 @@ namespace YanK
 
 		private Vector2 _scroll;
 
-		private const string WindowTitle = "Yan-K Scene";
+		private const string WindowTitle = "Yan-K Scene Controller";
 
 		public static void ShowWindow()
 		{
@@ -293,7 +293,7 @@ namespace YanK
 			GUI.backgroundColor = _autoRef ? new Color(0.4f, 1f, 0.4f) : new Color(1f, 0.4f, 0.4f);
 			var autoRefContent = new GUIContent("A",
 				YanKLocalization.L("scAutoRefTip",
-					"Auto Reference: automatically find & link the unique humanoid avatar in the scene."));
+					"Auto Reference: automatically find and assign the only humanoid avatar in the scene."));
 			if (GUILayout.Button(autoRefContent, GUILayout.Width(22), GUILayout.Height(18)))
 				_autoRef = !_autoRef;
 			GUI.backgroundColor = prevBg;
@@ -362,7 +362,7 @@ namespace YanK
 		{
 			EditorGUILayout.HelpBox(
 				YanKLocalization.L("scStubInfo",
-					"The Controller UI lives in its own window so the Inspector stays free."),
+					"The controller UI opens in its own window, leaving the Inspector free."),
 				MessageType.Info);
 			if (GUILayout.Button(YanKLocalization.L("scOpenWindow", "Open Scene Controller Window")))
 			{

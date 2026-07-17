@@ -32,7 +32,7 @@ namespace YanK
 			int newMode = GUILayout.Toolbar(current, modeNames, GUILayout.Height(22));
 			if (newMode != current) exportMode = (ExportMode)newMode;
 
-			EditorGUILayout.LabelField(string.Format(L("bseExportCount", "{0} blendshape(s) will be exported"), count), dimLabelStyle);
+			EditorGUILayout.LabelField(string.Format(L("bseExportCount", "Blendshapes to export: {0}"), count), dimLabelStyle);
 
 			GUI.enabled = true;
 		}

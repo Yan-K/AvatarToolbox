@@ -65,8 +65,8 @@ namespace YanK
 				// Output mode selector
 				EditorGUILayout.LabelField(L("ncOutputFolder", "Output"), EditorStyles.boldLabel);
 				int newModeIdx = GUILayout.Toolbar((int)outputMode,
-					new[] { L("ncOutputModeOriginal", "Original (next to source)"),
-					        L("ncOutputModeCustom",   "Custom folder") });
+					new[] { L("ncOutputModeOriginal", "Next to Source"),
+					        L("ncOutputModeCustom",   "Custom Folder") });
 				var newMode = (OutputMode)newModeIdx;
 				if (newMode != outputMode) SetOutputMode(newMode);
 
@@ -118,7 +118,7 @@ namespace YanK
 
 					// -- Left column: pipeline copy --
 					EditorGUILayout.BeginVertical(GUILayout.Width(colW));
-					EditorGUILayout.LabelField(L("ncPipelineCopy", "Pipeline Copy"), EditorStyles.boldLabel);
+					EditorGUILayout.LabelField(L("ncPipelineCopy", "Render Settings"), EditorStyles.boldLabel);
 					DrawAdvancedToggle("ncConvertFur", "Convert Fur",
 						"Convert lilToon Fur materials to NonToonFur. OFF leaves Fur materials completely unconverted (they stay lilToon).",
 						options.ConvertFur, SetConvertFur);
@@ -145,19 +145,19 @@ namespace YanK
 					EditorGUILayout.BeginVertical(GUILayout.Width(colW));
 					EditorGUILayout.LabelField(L("ncBakeOptions", "Texture Baking"), EditorStyles.boldLabel);
 					DrawAdvancedToggle("ncBakeMainTex",   "Bake Main Texture",
-						"Composite Color + HSVG + 2nd/3rd layers into a single texture using lilToon's baker",
+						"Composite Color, HSVG, and 2nd/3rd layers into one texture with lilToon's baker",
 						options.BakeMainTex,   SetBakeMainTex);
 					DrawAdvancedToggle("ncBakeAlphaMask", "Bake Alpha Mask",
-						"Bake an enabled lilToon alpha mask with non-extreme transparency/cutoff into the base texture's alpha channel",
+						"Bake the active lilToon alpha mask into the base texture's alpha channel when transparency and cutoff are within usable ranges",
 						options.BakeAlphaMask, SetBakeAlphaMask);
 					DrawAdvancedToggle("ncBakeEmission",  "Bake Emission",
-						"Port HDR color, alpha, Blend and texture strength through an editable SharedMask. Optimized for lilToon's Add mode; color remains grayscale.",
+						"Transfer HDR color, alpha, Blend, and texture strength through an editable SharedMask. This works best with lilToon Add mode; the color remains grayscale.",
 						options.BakeEmission,  SetBakeEmission);
 					DrawAdvancedToggle("ncBakeNormalMap", "Bake Normal Map (tiling)",
 						"Re-bake normal map when tiling/offset is non-default",
 						options.BakeNormalMap, SetBakeNormalMap);
 					DrawAdvancedToggle("ncBakeMasks",     "Create SharedMask",
-						"Create a Shader Core .scmask whose RGBA slots link original textures or required composite bakes",
+						"Create a Shader Core .scmask and link source textures or required composite bakes to its RGBA slots",
 						options.BakeMasks,     SetBakeMasks);
 					DrawAdvancedToggle("ncBakeShadow",    "Create Shadow Gradients",
 						"Create an editable Shader Core .scgradients asset from lilToon shadow color",
@@ -171,8 +171,8 @@ namespace YanK
 					if (anyBake)
 					{
 						GUILayout.Space(3);
-						GUILayout.Label(
-							"⚠ " + L("ncBakeAtOwnRisk", "Baked results may not be accurate — use at your own risk."),
+					GUILayout.Label(
+						"⚠ " + L("ncBakeAtOwnRisk", "Baked results may require manual adjustment."),
 							bakeHelpStyle);
 					}
 				}

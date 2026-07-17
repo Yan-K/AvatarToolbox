@@ -37,8 +37,9 @@ namespace YanK
 			{
 				EditorGUILayout.HelpBox(
 					YanKLocalization.L("scSceneDisabledHint",
-						"Scene settings are disabled. Click Enable to apply recommended defaults " +
-						"(procedural skybox, directional light, debug floor). Snapshot is taken so you can revert."),
+						"Scene settings are disabled. Click Enable to apply the recommended defaults: " +
+						"a gray skybox, linear fog, a directional light, a debug floor, and Basic post-processing. " +
+						"A snapshot is saved so you can revert the changes."),
 					MessageType.None);
 				if (GUILayout.Button(YanKLocalization.L("scEnableScene", "Enable Scene Settings"), GUILayout.Height(28)))
 				{
@@ -51,7 +52,7 @@ namespace YanK
 			// Header row with Disable button on the right.
 			EditorGUILayout.BeginHorizontal();
 			EditorGUILayout.LabelField(
-				YanKLocalization.L("scSceneEnabled", "Scene Settings Active"), EditorStyles.boldLabel);
+				YanKLocalization.L("scSceneEnabled", "Scene Settings Enabled"), EditorStyles.boldLabel);
 			GUILayout.FlexibleSpace();
 			if (GUILayout.Button(YanKLocalization.L("scDisableScene", "Disable"), GUILayout.Width(90)))
 			{
