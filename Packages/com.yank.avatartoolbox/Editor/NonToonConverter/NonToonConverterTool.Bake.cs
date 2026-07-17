@@ -93,7 +93,7 @@ namespace YanK
 			// lilToon's effective emission strength includes HDR color, color alpha and the
 			// separate _EmissionBlend slider. Skip only when that combined energy is negligible.
 			if (!src.HasProperty("_EmissionColor")) return true;
-			Color color = src.GetColor("_EmissionColor");
+			Color color = MaterialColorToShaderSpace(src.GetColor("_EmissionColor"));
 			float luminance = 0.2126729f * Mathf.Max(0f, color.r) +
 			                  0.7151522f * Mathf.Max(0f, color.g) +
 			                  0.0721750f * Mathf.Max(0f, color.b);
@@ -259,6 +259,7 @@ namespace YanK
 			bool hasTiling = !(Mathf.Approximately(mainST.x, 1f) && Mathf.Approximately(mainST.y, 1f) &&
 			                   Mathf.Approximately(mainST.z, 0f) && Mathf.Approximately(mainST.w, 0f));
 			bool shouldBakeMain  = bakeMainTexture && (hasColor || hasHSVG || has2nd || has3rd || hasGrad || hasTiling);
+			bool shouldBakeLayerAlpha = bakeMainTexture && HasMainLayerAlphaBlend(src);
 			bool shouldBakeAlpha = bakeAlphaMask && ShouldBakeAlphaMask(src);
 
 			// Nothing to composite → keep the original texture mapping.
@@ -299,6 +300,20 @@ namespace YanK
 					workingTex = generatedTex;
 				}
 
+				if (shouldBakeLayerAlpha)
+				{
+					// Hidden/ltsother_baker composites only the RGB part of 2nd/3rd layers. lilToon
+					// applies their Alpha Mode controls separately and in order, so reproduce that
+					// before the normal alpha-mask pass.
+					var layerAlphaBaked = BakeMainLayerAlpha(src, workingTex, mainFull.width, mainFull.height, mainST);
+					if (layerAlphaBaked != null)
+					{
+						if (generatedTex != null) Object.DestroyImmediate(generatedTex);
+						generatedTex = layerAlphaBaked;
+						workingTex = generatedTex;
+					}
+				}
+
 				if (shouldBakeAlpha)
 				{
 					// lilToon's alpha-mask baker is a separate keyword path. Run it after the
@@ -329,7 +344,8 @@ namespace YanK
 
 				var saved = SaveTexturePng(workingTex, folder, baseName + "_NTBake");
 				if (saved != null)
-					CopyImportSettings(srcMain, saved, asNormal: false, alphaIsTransparency: shouldBakeAlpha);
+					CopyImportSettings(srcMain, saved, asNormal: false,
+					                   alphaIsTransparency: shouldBakeAlpha || shouldBakeLayerAlpha);
 				return saved;
 			}
 			finally
@@ -365,6 +381,79 @@ namespace YanK
 			}
 
 			return true;
+		}
+
+		private static bool HasMainLayerAlphaBlend(Material src)
+		{
+			return HasActiveMainLayerAlphaBlend(src, "_UseMain2ndTex", "_Main2ndTexAlphaMode") ||
+			       HasActiveMainLayerAlphaBlend(src, "_UseMain3rdTex", "_Main3rdTexAlphaMode");
+		}
+
+		private static bool HasActiveMainLayerAlphaBlend(Material src, string useProperty, string modeProperty)
+		{
+			return IsFeatureActive(src, useProperty) && src.HasProperty(modeProperty) &&
+			       Mathf.RoundToInt(src.GetFloat(modeProperty)) != 0;
+		}
+
+		private static Texture2D BakeMainLayerAlpha(Material src, Texture source, int width, int height,
+		                                                   Vector4 sourceMainST)
+		{
+			var shader = Shader.Find("Hidden/AvatarToolbox/NonToonMainLayerAlphaBaker");
+			if (shader == null)
+			{
+				Debug.LogWarning("[YNC] Main-layer alpha baker shader not found - 2nd/3rd alpha modes were skipped");
+				return null;
+			}
+
+			var material = new Material(shader);
+			try
+			{
+				material.SetTexture("_MainTex", source);
+				material.SetVector("_SourceMainTex_ST", sourceMainST);
+				CopyMainLayerAlphaToBaker(src, material, "2nd");
+				CopyMainLayerAlphaToBaker(src, material, "3rd");
+				return RunBlit(material, source, width, height, false);
+			}
+			finally
+			{
+				Object.DestroyImmediate(material);
+			}
+		}
+
+		private static void CopyMainLayerAlphaToBaker(Material src, Material dst, string layer)
+		{
+			string useProperty = "_UseMain" + layer + "Tex";
+			string colorProperty = "_Color" + layer;
+			string textureProperty = "_Main" + layer + "Tex";
+			string maskProperty = "_Main" + layer + "BlendMask";
+			string modeProperty = textureProperty + "AlphaMode";
+			string uvModeProperty = textureProperty + "_UVMode";
+			string opaqueProperty = textureProperty + "AlphaIsOpaque";
+
+			dst.SetFloat(useProperty, IsFeatureActive(src, useProperty) ? 1f : 0f);
+			dst.SetColor(colorProperty, src.HasProperty(colorProperty) ? src.GetColor(colorProperty) : Color.white);
+			dst.SetFloat(modeProperty, src.HasProperty(modeProperty) ? src.GetFloat(modeProperty) : 0f);
+
+			var texture = src.HasProperty(textureProperty) ? src.GetTexture(textureProperty) as Texture2D : null;
+			bool textureAlphaIsOpaque = texture == null || !TextureAlphaRequiresBake(texture);
+			dst.SetFloat(opaqueProperty, textureAlphaIsOpaque ? 1f : 0f);
+			if (texture != null)
+			{
+				dst.SetTexture(textureProperty, texture);
+				dst.SetTextureScale(textureProperty, src.GetTextureScale(textureProperty));
+				dst.SetTextureOffset(textureProperty, src.GetTextureOffset(textureProperty));
+			}
+
+			if (src.HasProperty(maskProperty) && src.GetTexture(maskProperty) != null)
+				dst.SetTexture(maskProperty, src.GetTexture(maskProperty));
+
+			int uvMode = src.HasProperty(uvModeProperty) ? Mathf.RoundToInt(src.GetFloat(uvModeProperty)) : 0;
+			if (uvMode != 0 && !textureAlphaIsOpaque &&
+			    src.HasProperty(modeProperty) && Mathf.RoundToInt(src.GetFloat(modeProperty)) != 0)
+			{
+				Debug.LogWarning($"[YNC] {src.name}: {textureProperty} has varying alpha on UV mode {uvMode}. " +
+				                 "A flat Base Texture cannot reproduce that mesh/view-dependent mapping, so UV0 was used as a fallback.");
+			}
 		}
 
 		private static void CopyMain2ndToBaker(Material src, Material dst)
@@ -607,7 +696,9 @@ namespace YanK
 
 		private static EditableMaskChannel CreateDirectEmissionMapChannel(Material material, Texture2D texture)
 		{
-			Color color = material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.white;
+			Color color = material.HasProperty("_EmissionColor")
+				? MaterialColorToShaderSpace(material.GetColor("_EmissionColor"))
+				: Color.white;
 			float r = Mathf.Max(0f, color.r), g = Mathf.Max(0f, color.g), b = Mathf.Max(0f, color.b);
 			float luminance = 0.2126729f * r + 0.7151522f * g + 0.0721750f * b;
 			if (luminance <= 0.000001f)
@@ -744,7 +835,9 @@ namespace YanK
 				? SampleMaskGrayscale(blendMask, width, height, useLuma: false,
 					material.GetTextureScale("_EmissionBlendMask"), material.GetTextureOffset("_EmissionBlendMask"))
 				: null;
-			Color emissionColor = material.HasProperty("_EmissionColor") ? material.GetColor("_EmissionColor") : Color.white;
+			Color emissionColor = material.HasProperty("_EmissionColor")
+				? MaterialColorToShaderSpace(material.GetColor("_EmissionColor"))
+				: Color.white;
 			float colorR = Mathf.Max(0f, emissionColor.r), colorG = Mathf.Max(0f, emissionColor.g), colorB = Mathf.Max(0f, emissionColor.b);
 			float colorLuminance = 0.2126729f * colorR + 0.7151522f * colorG + 0.0721750f * colorB;
 			Vector3 weights = colorLuminance > 0.000001f
@@ -773,7 +866,9 @@ namespace YanK
 
 		private static float CalculateEmissionLightBoost(Material src)
 		{
-			Color color = src.HasProperty("_EmissionColor") ? src.GetColor("_EmissionColor") : Color.white;
+			Color color = src.HasProperty("_EmissionColor")
+				? MaterialColorToShaderSpace(src.GetColor("_EmissionColor"))
+				: Color.white;
 			float luminance = 0.2126729f * Mathf.Max(0f, color.r) +
 			                  0.7151522f * Mathf.Max(0f, color.g) +
 			                  0.0721750f * Mathf.Max(0f, color.b);
@@ -897,14 +992,14 @@ namespace YanK
 		}
 
 		/// <summary>
-		/// Bake a matcap texture: optional multi-pass blur (cheap Gaussian matching lilToon's Lod/Blur,
-		/// <paramref name="lod"/> = lilToon's _MatCapLod range 0–10) followed by an optional fade toward
-		/// white by <paramref name="multiplyStrength"/> (0–1). The fade recovers lilToon's Multiply
-		/// blend strength (_MatCapBlend × color.a): NonToon multiplies the base by lerp(1, tex·color,
-		/// mask), so pre-fading the texture toward white makes a reduced-alpha lilToon matcap stop
-		/// looking glossy. Blur and fade are baked into a SINGLE output asset (no orphan intermediate).
+		/// Bake a matcap texture after optional multi-pass blur. Add folds sampled texture alpha into
+		/// RGB. Multiply bakes the complete <c>lerp(1, texture.rgb * tint.rgb,
+		/// strength * texture.a)</c> factor. LDR results leave the destination color white; any HDR range
+		/// is normalized into the destination color so this RGBA32 PNG never clips the result.
+		/// All color math is performed in the same shader-working space as lilToon/NonToon.
 		/// </summary>
-		private static Texture2D BakeMatCap(Texture2D src, float lod, float multiplyStrength,
+		private static Texture2D BakeMatCap(Texture2D src, float lod, bool multiply, Color tint,
+		                                     float strength, bool useTextureAlpha,
 		                                     string folder, string nameNoExt)
 		{
 			if (src == null) return null;
@@ -943,15 +1038,32 @@ namespace YanK
 				outTex.Apply();
 			}
 
-			// Fade toward white by strength (Multiply matcaps only — caller passes 1 otherwise).
-			if (multiplyStrength < 0.996f)
+			if (multiply || useTextureAlpha)
 			{
-				float s   = Mathf.Clamp01(multiplyStrength);
-				var   px  = outTex.GetPixels();
+				float s = Mathf.Clamp01(strength);
+				Color tintShader = MaterialColorToShaderSpace(tint);
+				Color multiplyScale = MatCapMultiplyScaleShader(tint, strength);
+				bool convertSrgb = QualitySettings.activeColorSpace == ColorSpace.Linear && TextureUsesSrgb(src);
+				var px = outTex.GetPixels();
 				for (int i = 0; i < px.Length; i++)
-					px[i] = new Color(Mathf.Lerp(1f, px[i].r, s),
-					                  Mathf.Lerp(1f, px[i].g, s),
-					                  Mathf.Lerp(1f, px[i].b, s), 1f);
+				{
+					float a = useTextureAlpha ? Mathf.Clamp01(px[i].a) : 1f;
+					Color sample = convertSrgb ? px[i].linear : px[i];
+					if (multiply)
+					{
+						float weight = s * a;
+						sample = new Color(
+							Mathf.Lerp(1f, sample.r * tintShader.r, weight) / multiplyScale.r,
+							Mathf.Lerp(1f, sample.g * tintShader.g, weight) / multiplyScale.g,
+							Mathf.Lerp(1f, sample.b * tintShader.b, weight) / multiplyScale.b, 1f);
+					}
+					else
+					{
+						sample = new Color(sample.r * a, sample.g * a, sample.b * a, 1f);
+					}
+					px[i] = convertSrgb ? sample.gamma : sample;
+					px[i].a = 1f;
+				}
 				outTex.SetPixels(px);
 				outTex.Apply();
 			}
@@ -961,6 +1073,13 @@ namespace YanK
 			var saved = SaveTexturePng(outTex, folder, nameNoExt + "_MatCap_NTBake");
 			if (saved != null) CopyImportSettings(src, saved, asNormal: false);
 			return saved;
+		}
+
+		private static bool TextureUsesSrgb(Texture2D texture)
+		{
+			string path = texture != null ? AssetDatabase.GetAssetPath(texture) : null;
+			var importer = !string.IsNullOrEmpty(path) ? AssetImporter.GetAtPath(path) as TextureImporter : null;
+			return importer == null || importer.sRGBTexture;
 		}
 
 		// =====================================================================

@@ -181,11 +181,13 @@ namespace YanK
 				ApplyFurVector(src, dst);
 			}
 
-			// 3. RimLight (gated on _UseRim; HDR→LDR + alpha→darkness)
+			// 3. RimLight (gated on _UseRim; preserve HDR exposure and fold alpha into energy)
 			if (IsFeatureActive(src, "_UseRim") &&
 			    src.HasProperty("_RimColor") && dst.HasProperty(P_RimLight + "RimLightColor"))
 			{
-				dst.SetColor(P_RimLight + "RimLightColor", HdrToLdr(src.GetColor("_RimColor"), applyAlpha: true));
+				Color rimColor = src.GetColor("_RimColor");
+				dst.SetColor(P_RimLight + "RimLightColor",
+				             ScaleMaterialColorForShader(rimColor, Mathf.Clamp01(rimColor.a)));
 			}
 
 			// 4. MatCaps — blend-mode-aware routing + blur bake
@@ -556,13 +558,16 @@ namespace YanK
 				float  s1    = MatCapStrength(src, "_MatCapColor", "_MatCapBlend");
 				if (src.HasProperty("_MatCapColor") && dst.HasProperty(cProp))
 				{
-					Color c = HdrToLdr(src.GetColor("_MatCapColor"), applyAlpha: false);
-					// Add slot is linear in color → fold strength into RGB. Multiply slot keeps the
-					// tint; strength is baked into the texture (fade toward white) instead.
-					if (!mul1) { c.r *= s1; c.g *= s1; c.b *= s1; }
-					dst.SetColor(cProp, c);
+					Color sourceColor = src.GetColor("_MatCapColor");
+					Color tint = sourceColor;
+					Color targetColor = mul1
+						? MatCapMultiplyTargetColor(tint, s1)
+						: ScaleMaterialColorForShader(tint, s1);
+					targetColor.a = Mathf.Clamp01(sourceColor.a);
+					dst.SetColor(cProp, targetColor);
+					AssignMatCapTex(src, "_MatCapTex", "_MatCapLod", dst, tProp, mul1, tint, s1,
+					                folder, baseName + "_MatCap1");
 				}
-				AssignMatCapTex(src, "_MatCapTex",    "_MatCapLod",    dst, tProp, mul1, s1, folder, baseName + "_MatCap1");
 			}
 			if (use2)
 			{
@@ -571,20 +576,25 @@ namespace YanK
 				float  s2    = MatCapStrength(src, "_MatCap2ndColor", "_MatCap2ndBlend");
 				if (src.HasProperty("_MatCap2ndColor") && dst.HasProperty(cProp))
 				{
-					Color c = HdrToLdr(src.GetColor("_MatCap2ndColor"), applyAlpha: false);
-					if (!mul2) { c.r *= s2; c.g *= s2; c.b *= s2; }
-					dst.SetColor(cProp, c);
+					Color sourceColor = src.GetColor("_MatCap2ndColor");
+					Color tint = sourceColor;
+					Color targetColor = mul2
+						? MatCapMultiplyTargetColor(tint, s2)
+						: ScaleMaterialColorForShader(tint, s2);
+					targetColor.a = Mathf.Clamp01(sourceColor.a);
+					dst.SetColor(cProp, targetColor);
+					AssignMatCapTex(src, "_MatCap2ndTex", "_MatCap2ndLod", dst, tProp, mul2, tint, s2,
+					                folder, baseName + "_MatCap2");
 				}
-				AssignMatCapTex(src, "_MatCap2ndTex", "_MatCap2ndLod", dst, tProp, mul2, s2, folder, baseName + "_MatCap2");
 			}
 		}
 
 		/// <summary>
 		/// lilToon blends a matcap with strength <c>_MatCapBlend * _MatCapColor.a * mask</c>
-		/// (lil_common_frag.hlsl). NonToon's matcap has no blend/alpha term — the color alpha is
-		/// ignored — so the per-material scalar (blend × color.a) is lost, leaving the matcap at full
-		/// strength (glossy skin). We recover that scalar here; the caller folds it into the Add color
-		/// or the Multiply texture. The per-pixel mask term is handled separately by SharedMask packing.
+		/// (lil_common_frag.hlsl). NonToon's matcap has no blend/alpha term, so the per-material scalar
+		/// is folded into Add color or the baked Multiply factor. Folding happens in shader-linear space;
+		/// applying it directly to the inspector RGB is much too dark in a Linear color-space project.
+		/// The per-pixel blend mask remains handled by SharedMask packing.
 		/// </summary>
 		private static float MatCapStrength(Material src, string colorProp, string blendProp)
 		{
@@ -594,7 +604,8 @@ namespace YanK
 		}
 
 		private static void AssignMatCapTex(Material src, string srcTexProp, string lodProp,
-		                                     Material dst, string dstTexProp, bool multiply, float strength,
+		                                     Material dst, string dstTexProp, bool multiply, Color tint,
+		                                     float strength,
 		                                     string folder, string nameNoExt)
 		{
 			if (!src.HasProperty(srcTexProp) || !dst.HasProperty(dstTexProp)) return;
@@ -602,17 +613,23 @@ namespace YanK
 			if (srcTex == null) return;
 
 			float lod = src.HasProperty(lodProp) ? src.GetFloat(lodProp) : 0f;
-			// Multiply matcaps carry their strength in the texture (fade toward white); Add matcaps
-			// already have it folded into the color, so pass strength = 1 to skip the fade.
-			float texStrength = multiply ? strength : 1f;
-
+			bool useTextureAlpha = TextureAlphaRequiresBake(srcTex);
 			bool needBlur = lod > 0.05f;
-			bool needFade = texStrength < 0.996f;
-			var  result   = (needBlur || needFade)
-			                ? BakeMatCap(srcTex, needBlur ? lod : 0f, texStrength, folder, nameNoExt)
+			bool needMultiplyBake = multiply &&
+				(strength < 0.996f || !ApproximatelyWhite(tint) || useTextureAlpha);
+			bool needAddBake = !multiply && useTextureAlpha;
+			var result = (needBlur || needMultiplyBake || needAddBake)
+			                ? BakeMatCap(srcTex, needBlur ? lod : 0f, multiply, tint, strength,
+			                             useTextureAlpha, folder, nameNoExt)
 			                : srcTex;
 
 			if (result != null) dst.SetTexture(dstTexProp, result);
+		}
+
+		private static bool ApproximatelyWhite(Color color)
+		{
+			return Mathf.Approximately(color.r, 1f) && Mathf.Approximately(color.g, 1f) &&
+			       Mathf.Approximately(color.b, 1f);
 		}
 
 		// =====================================================================
@@ -690,20 +707,68 @@ namespace YanK
 		}
 
 		/// <summary>
-		/// Convert a lilToon HDR color to an LDR color NonToon can display. If a channel exceeds 1,
-		/// the color is normalized by its max channel (preserving hue). When <paramref name="applyAlpha"/>
-		/// is true (rim), the alpha is folded into brightness (alpha→darkness). Alpha is returned as 1.
+		/// Convert a serialized material color to the RGB value its Color shader property receives.
+		/// Unity stores the HDR picker exposure in RGB itself; Color properties are converted from sRGB
+		/// to linear when a Linear color-space project uploads them to the shader.
 		/// </summary>
-		private static Color HdrToLdr(Color c, bool applyAlpha)
+		private static Color MaterialColorToShaderSpace(Color materialColor)
 		{
-			float maxC = Mathf.Max(c.r, Mathf.Max(c.g, c.b));
-			if (maxC > 1f) { c.r /= maxC; c.g /= maxC; c.b /= maxC; }
-			if (applyAlpha)
-			{
-				float a = Mathf.Clamp01(c.a);
-				c.r *= a; c.g *= a; c.b *= a;
-			}
-			return new Color(Mathf.Clamp01(c.r), Mathf.Clamp01(c.g), Mathf.Clamp01(c.b), 1f);
+			float alpha = materialColor.a;
+			Color result = QualitySettings.activeColorSpace == ColorSpace.Linear
+				? materialColor.linear
+				: materialColor;
+			result.r = Mathf.Max(0f, result.r);
+			result.g = Mathf.Max(0f, result.g);
+			result.b = Mathf.Max(0f, result.b);
+			result.a = alpha;
+			return result;
+		}
+
+		/// <summary>Convert shader-working-space RGB back to a serialized material Color.</summary>
+		private static Color ShaderColorToMaterialSpace(Color shaderColor, float alpha)
+		{
+			Color result = QualitySettings.activeColorSpace == ColorSpace.Linear
+				? shaderColor.gamma
+				: shaderColor;
+			result.r = Mathf.Max(0f, result.r);
+			result.g = Mathf.Max(0f, result.g);
+			result.b = Mathf.Max(0f, result.b);
+			result.a = alpha;
+			return result;
+		}
+
+		/// <summary>
+		/// Fold a shader-side scalar into a material color without discarding HDR exposure. This is the
+		/// color-space-correct form of <c>shaderColor.rgb *= strength</c>.
+		/// </summary>
+		private static Color ScaleMaterialColorForShader(Color materialColor, float strength)
+		{
+			Color shaderColor = MaterialColorToShaderSpace(materialColor);
+			float s = Mathf.Max(0f, strength);
+			shaderColor.r *= s;
+			shaderColor.g *= s;
+			shaderColor.b *= s;
+			return ShaderColorToMaterialSpace(shaderColor, materialColor.a);
+		}
+
+		/// <summary>
+		/// Per-channel normalization used by a baked Multiply matcap. LDR factors keep a white target
+		/// color as requested by the PR review. HDR factors put only the over-1 range in the material
+		/// color so the PNG bake remains lossless while the product stays mathematically identical.
+		/// </summary>
+		private static Color MatCapMultiplyScaleShader(Color tint, float strength)
+		{
+			Color shaderTint = MaterialColorToShaderSpace(tint);
+			float s = Mathf.Clamp01(strength);
+			return new Color(
+				Mathf.Max(1f, Mathf.Lerp(1f, shaderTint.r, s)),
+				Mathf.Max(1f, Mathf.Lerp(1f, shaderTint.g, s)),
+				Mathf.Max(1f, Mathf.Lerp(1f, shaderTint.b, s)), 1f);
+		}
+
+		private static Color MatCapMultiplyTargetColor(Color tint, float strength)
+		{
+			return ShaderColorToMaterialSpace(MatCapMultiplyScaleShader(tint, strength), tint.a);
 		}
 
 		/// <summary>Set float on a Float-typed shader property.</summary>

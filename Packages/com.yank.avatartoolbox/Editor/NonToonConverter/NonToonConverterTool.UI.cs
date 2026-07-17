@@ -122,15 +122,15 @@ namespace YanK
 					DrawAdvancedToggle("ncConvertFur", "Convert Fur",
 						"Convert lilToon Fur materials to NonToonFur. OFF leaves Fur materials completely unconverted (they stay lilToon).",
 						options.ConvertFur, SetConvertFur);
+					DrawAdvancedToggle("ncCopyCull", "Copy Cull",
+						"Copy _Cull from source (Back=2, Front=1, Off=0)",
+						options.CopyCull, SetCopyCull);
 					DrawAdvancedToggle("ncCopyRenderQueue", "Copy Render Queue",
 						"Copy renderQueue verbatim. OFF = mode-derived queue (Opaque=-1, Cutout=2450, Transparent=3000)",
 						options.CopyRenderQueue, SetCopyRenderQueue);
 					DrawAdvancedToggle("ncCopyStencil", "Copy Stencil",
 						"Copy _StencilRef / _StencilComp / _StencilPass from source",
 						options.CopyStencil, SetCopyStencil);
-					DrawAdvancedToggle("ncCopyCull", "Copy Cull",
-						"Copy _Cull from source (Back=2, Front=1, Off=0)",
-						options.CopyCull, SetCopyCull);
 					DrawAdvancedToggle("ncCopyZWrite", "Copy ZWrite",
 						"Copy _ZWrite from source",
 						options.CopyZWrite, SetCopyZWrite);

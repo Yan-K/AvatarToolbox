@@ -15,7 +15,7 @@ namespace YanK
 			// Fur (default ON)
 			public bool ConvertFur;
 
-			// Pipeline (all default OFF)
+			// Pipeline (Copy Cull default ON; all others default OFF)
 			public bool      CopyRenderQueue;
 			public bool      CopyStencil;
 			public bool      CopyCull;
@@ -73,7 +73,7 @@ namespace YanK
 			options.ConvertFur         = EditorPrefs.GetBool(NC_ConvertFur,         true);
 			options.CopyRenderQueue    = EditorPrefs.GetBool(NC_CopyRenderQueue,    false);
 			options.CopyStencil        = EditorPrefs.GetBool(NC_CopyStencil,        false);
-			options.CopyCull           = EditorPrefs.GetBool(NC_CopyCull,           false);
+			options.CopyCull           = EditorPrefs.GetBool(NC_CopyCull,           true);
 			options.CopyZWrite         = EditorPrefs.GetBool(NC_CopyZWrite,         false);
 			options.CopyBlend          = EditorPrefs.GetBool(NC_CopyBlend,          false);
 			options.ForceRenderingMode = (ForceMode)EditorPrefs.GetInt(NC_ForceRenderingMode, 0);

@@ -184,6 +184,7 @@ YNC Change: added AlphaMask bake, changed pack format to .scmask and .scgradient
 
 Localization refactor.
 YSP refactor: better GUID conflict detection, better error handling.
+YNC Change: better MatCap tint conversion.
 
 ## Credit
 
