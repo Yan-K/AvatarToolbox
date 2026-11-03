@@ -186,6 +186,11 @@ Localization refactor.
 YSP refactor: better GUID conflict detection, better error handling.
 YNC Change: better MatCap tint conversion.
 
+### v1.8.1 - 2026/11/03
+
+YSP Bug fix: fix packages failing to read or loading empty, when TAR member names start with ./ or folder .meta files omit folderAsset.
+YSP Bug fix: fix false GUID verification failures when importing a new embedded package.
+
 ## Credit
 
 - Yan-K ([@YanKMW](https://github.com/Yan-K))

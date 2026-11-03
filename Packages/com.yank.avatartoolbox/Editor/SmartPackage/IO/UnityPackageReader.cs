@@ -44,16 +44,12 @@ namespace YanK
 					var reader = new TarReader(buffered);
 					while (reader.MoveNext(out var entry))
 					{
-						string name = entry.Name ?? string.Empty;
-						int slash = name.IndexOf('/');
-						if (slash <= 0)
+						if (!TrySplitMemberName(entry.Name, out string guid, out string kind))
 						{
 							reader.SkipEntry();
 							continue;
 						}
 
-						string guid = name.Substring(0, slash).ToLowerInvariant();
-						string kind = name.Substring(slash + 1);
 						bool knownKind = kind == "asset" || kind == "asset.meta"
 							|| kind == "pathname" || kind == "preview.png";
 						if (!GuidUtility.IsValidGuid(guid) || !knownKind)
@@ -137,16 +133,8 @@ namespace YanK
 					var reader = new TarReader(buffered);
 					while (reader.MoveNext(out var entry))
 					{
-						string name = entry.Name ?? string.Empty;
-						int slash = name.IndexOf('/');
-						if (slash <= 0)
-						{
-							reader.SkipEntry();
-							continue;
-						}
-						string guid = name.Substring(0, slash).ToLowerInvariant();
-						string kind = name.Substring(slash + 1);
-						if (!wanted.Contains(guid) || (kind != "asset" && kind != "asset.meta"))
+						if (!TrySplitMemberName(entry.Name, out string guid, out string kind)
+							|| !wanted.Contains(guid) || (kind != "asset" && kind != "asset.meta"))
 						{
 							reader.SkipEntry();
 							continue;
@@ -182,6 +170,25 @@ namespace YanK
 			}
 
 			return result;
+		}
+
+		// Splits "<guid>/<kind>". Archives made by running tar over a package directory
+		// prefix every member with "./".
+		private static bool TrySplitMemberName(string name, out string guid, out string kind)
+		{
+			guid = null;
+			kind = null;
+			if (name == null)
+				return false;
+			while (name.StartsWith("./", StringComparison.Ordinal))
+				name = name.Substring(2);
+
+			int slash = name.IndexOf('/');
+			if (slash <= 0)
+				return false;
+			guid = name.Substring(0, slash).ToLowerInvariant();
+			kind = name.Substring(slash + 1);
+			return true;
 		}
 
 		private static void ValidateMetadataRecord(UnityPackageEntry record, string filePath)
@@ -221,8 +228,11 @@ namespace YanK
 
 			if (!record.HasMetaMember)
 				throw new InvalidDataException("Unity asset entry is missing asset.meta: " + normalized);
-			if (!record.HasAssetMember && !record.IsFolder)
-				throw new InvalidDataException("Unity asset entry has no payload and is not a folder: " + normalized);
+
+			// A missing asset member is what marks a folder. IDE-generated metas can omit
+			// `folderAsset: yes`, and Unity exports them as they are.
+			if (!record.HasAssetMember)
+				record.IsFolder = true;
 		}
 	}
 

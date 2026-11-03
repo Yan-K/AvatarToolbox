@@ -612,11 +612,19 @@ namespace YanK
 			for (int i = 0; i < writtenItems.Count; i++)
 				finalByPath[writtenItems[i].TargetPath] = writtenItems[i];
 
+			bool hasUnregisteredPackage = false;
 			foreach (ImportPlanItem item in finalByPath.Values)
 			{
 				string expected = item.Entry.IdentityGuid;
 				if (string.IsNullOrEmpty(expected))
 					continue;
+				// AssetDatabase does not index a new embedded package until the Package
+				// Manager registers it, so there is no GUID to read back yet.
+				if (IsInUnregisteredPackage(item.TargetPath))
+				{
+					hasUnregisteredPackage = true;
+					continue;
+				}
 				string actual = AssetDatabase.AssetPathToGUID(item.TargetPath);
 				if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
 				{
@@ -625,6 +633,17 @@ namespace YanK
 						+ ". Expected " + expected + ", got " + (string.IsNullOrEmpty(actual) ? "(none)" : actual));
 				}
 			}
+
+			if (hasUnregisteredPackage)
+				UnityEditor.PackageManager.Client.Resolve();
+		}
+
+		private static bool IsInUnregisteredPackage(string path)
+		{
+			string[] parts = path.Split('/');
+			return parts.Length > 1
+				&& string.Equals(parts[0], "Packages", StringComparison.Ordinal)
+				&& !AssetDatabase.IsValidFolder("Packages/" + parts[1]);
 		}
 	}
 }
