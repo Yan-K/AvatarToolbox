@@ -32,7 +32,7 @@ namespace YanK
 		private readonly List<MaterialSlot> materialSlots = new List<MaterialSlot>();
 		private bool selectAll;
 		private Material batchReplaceMaterial;
-		private readonly List<Material> inspectedMaterials = new List<Material>();
+		[SerializeField] private List<Material> inspectedMaterials = new List<Material>();
 
 		// --- UI ---
 
@@ -211,6 +211,11 @@ namespace YanK
 
 		private void ScanMaterials()
 		{
+			// Keep checkbox / foldout state across rescans (undo, redo, include inactive...).
+			var previous = new Dictionary<Material, MaterialSlot>();
+			foreach (var s in materialSlots)
+				if (s.original != null && !previous.ContainsKey(s.original)) previous[s.original] = s;
+
 			materialSlots.Clear();
 			selectAll = false;
 
@@ -218,7 +223,10 @@ namespace YanK
 
 			if (rootObject is GameObject go)
 			{
-				var seen = new Dictionary<Material, MaterialSlot>();
+				var origins = BuildMaterialOriginLookup();
+				// Grouped by (original, current) so an edited slot keeps its own original, even when its
+				// current material is also used by other, unedited slots.
+				var seen = new Dictionary<(Material, Material), MaterialSlot>();
 				foreach (var renderer in go.GetComponentsInChildren<Renderer>(includeInactive))
 				{
 					var mats = renderer.sharedMaterials;
@@ -226,10 +234,16 @@ namespace YanK
 					{
 						var material = mats[i];
 						if (material == null) continue;
-						if (!seen.TryGetValue(material, out var slot))
+						var original = GetOriginalMaterial(origins, renderer, i, material);
+						if (!seen.TryGetValue((original, material), out var slot))
 						{
-							slot = new MaterialSlot { current = material, original = material };
-							seen[material] = slot;
+							slot = new MaterialSlot { current = material, original = original };
+							if (previous.TryGetValue(original, out var prev))
+							{
+								slot.selected = prev.selected;
+								slot.foldout = prev.foldout;
+							}
+							seen[(original, material)] = slot;
 							materialSlots.Add(slot);
 						}
 						slot.refs.Add(new RendererRef { renderer = renderer, materialIndex = i });
@@ -240,6 +254,8 @@ namespace YanK
 			{
 				materialSlots.Add(new MaterialSlot { current = rootMat, original = rootMat });
 			}
+
+			UpdateSelectAllState();
 		}
 
 		// --- Operations ---
@@ -263,6 +279,7 @@ namespace YanK
 				EditorUtility.SetDirty(renderer);
 			}
 			slot.current = newMaterial;
+			RefreshUnsavedState();
 			Repaint();
 		}
 

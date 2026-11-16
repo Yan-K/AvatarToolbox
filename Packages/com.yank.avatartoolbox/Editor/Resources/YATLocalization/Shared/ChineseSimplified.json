@@ -12,5 +12,11 @@
     "updateSkipConfirmTitle": "跳过更新",
     "updateSkipConfirmMessage": "这将隐藏更新提示，直到下一个版本发布。确定要跳过此次更新吗？",
     "updateSkipConfirmYes": "是，跳过",
-    "updateSkipConfirmNo": "否，继续提醒"
+    "updateSkipConfirmNo": "否，继续提醒",
+    "unsavedTitle": "未保存的编辑",
+    "unsavedMessage": "有未保存的编辑。要继续吗？",
+    "unsavedSave": "保存到场景",
+    "unsavedRevert": "恢复原始值",
+    "unsavedCancel": "取消",
+    "unsavedCloseMessage": "{0} 有未保存的编辑。保存（Save）将保留在场景中；放弃（Discard）将恢复为原始值。"
 }

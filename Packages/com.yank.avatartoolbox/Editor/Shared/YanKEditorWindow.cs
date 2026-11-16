@@ -245,5 +245,58 @@ namespace YanK
 		{
 			return YanKLocalization.L(key, defaultValue);
 		}
+
+		// --- Unsaved Edits ---
+		// Tools that edit scene values keep the originals for the session. These hooks let the
+		// window ask what to do with pending edits before its target goes away or it closes.
+
+		protected virtual bool HasUnsavedEdits() => false;
+
+		// Keeps the current values as the new originals.
+		protected virtual void SaveEdits() { }
+
+		// Restores every edited value to its original.
+		protected virtual void RevertEdits() { }
+
+		// Asks before the edited target is removed or replaced. Returns false when the user cancels.
+		protected bool ConfirmUnsavedEdits()
+		{
+			if (!HasUnsavedEdits()) return true;
+
+			int choice = EditorUtility.DisplayDialogComplex(
+				L("unsavedTitle", "Unsaved Edits"),
+				L("unsavedMessage", "There are unsaved edits. Do you want to continue?"),
+				L("unsavedSave", "Save to Scene"),
+				L("unsavedCancel", "Cancel"),
+				L("unsavedRevert", "Revert to Original"));
+
+			if (choice == 1) return false;
+			if (choice == 0) SaveEdits();
+			else RevertEdits();
+			RefreshUnsavedState();
+			return true;
+		}
+
+		// Mirrors HasUnsavedEdits() into hasUnsavedChanges so Unity asks before the window closes.
+		protected void RefreshUnsavedState()
+		{
+			saveChangesMessage = string.Format(
+				L("unsavedCloseMessage", "{0} has unsaved edits. Save keeps them in the scene; Discard reverts them to the original values."),
+				L(ToolTitleKey, ToolTitleDefault));
+			bool pending = HasUnsavedEdits();
+			if (hasUnsavedChanges != pending) hasUnsavedChanges = pending;
+		}
+
+		public override void SaveChanges()
+		{
+			SaveEdits();
+			base.SaveChanges();
+		}
+
+		public override void DiscardChanges()
+		{
+			RevertEdits();
+			base.DiscardChanges();
+		}
 	}
 }

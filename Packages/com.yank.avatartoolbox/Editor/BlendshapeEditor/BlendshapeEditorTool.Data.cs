@@ -7,7 +7,7 @@ namespace YanK
 			public int index;           // Index on the SkinnedMeshRenderer.sharedMesh
 			public string name;
 			public float current;       // 0-100
-			public float defaultValue;  // Captured on scan; used by Reset to Default
+			public float defaultValue;  // Session original (see RescanSlots); used by Reset to Default
 			public bool selected;       // Row checkbox
 			public bool isSeparator;    // Detected group-separator entry (not shown in main list)
 			public string groupName;    // Assigned group ("General" before any separator)
@@ -38,5 +38,8 @@ namespace YanK
 
 		private const string GroupViewAllKey = "__VIEW_ALL__";
 		private const string GroupGeneralKey = "__GENERAL__";
+
+		// Weight difference from the original that counts as an edit (yellow row).
+		private const float ModifiedThreshold = 0.01f;
 	}
 }

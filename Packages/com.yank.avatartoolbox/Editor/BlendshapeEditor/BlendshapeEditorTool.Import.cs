@@ -139,32 +139,33 @@ namespace YanK
 		{
 			if (!inPreview || targetRenderer == null) return;
 
-			// Capture current preview values and write them through with proper Undo.
-			var committed = new Dictionary<int, float>();
+			// Capture current preview values.
+			var committed = new List<KeyValuePair<BlendshapeSlot, float>>();
 			foreach (var s in slots)
 			{
 				if (s.isSeparator) continue;
-				committed[s.index] = s.current;
+				committed.Add(new KeyValuePair<BlendshapeSlot, float>(s, s.current));
 			}
 
-			// Restore to snapshot first so RegisterCompleteObjectUndo captures original state for proper Undo.
+			// Restore the snapshot first so the write below is one Undo step back to the pre-import state.
 			RestoreSnapshot();
-
-			Undo.RegisterCompleteObjectUndo(targetRenderer, "YBE: Import Blendshape Animation");
-			foreach (var kv in committed)
-			{
-				// Update both data model and the renderer.
-				foreach (var s in slots)
-					if (!s.isSeparator && s.index == kv.Key) s.current = kv.Value;
-				targetRenderer.SetBlendShapeWeight(kv.Key, kv.Value);
-			}
-			EditorUtility.SetDirty(targetRenderer);
-
 			inPreview = false;
 			importCurves.Clear();
 			remapEntries.Clear();
 			previewSnapshot = null;
 			importClip = null;
+
+			committed.RemoveAll(kv => kv.Value == kv.Key.current);
+			WriteWeights(committed, "YBE: Import Blendshape Animation");
+		}
+
+		// Leaves preview without restoring the snapshot (the renderer or its mesh is gone).
+		private void AbandonPreview()
+		{
+			inPreview = false;
+			importCurves.Clear();
+			remapEntries.Clear();
+			previewSnapshot = null;
 		}
 
 		private void RestoreSnapshot()

@@ -12,5 +12,11 @@
     "updateSkipConfirmTitle": "업데이트 건너뛰기",
     "updateSkipConfirmMessage": "다음 릴리스까지 업데이트 알림이 숨겨집니다. 이번 업데이트를 건너뛰시겠습니까?",
     "updateSkipConfirmYes": "예, 건너뛰기",
-    "updateSkipConfirmNo": "아니요, 계속 알림"
+    "updateSkipConfirmNo": "아니요, 계속 알림",
+    "unsavedTitle": "저장되지 않은 편집",
+    "unsavedMessage": "저장되지 않은 편집이 있습니다. 계속하시겠습니까?",
+    "unsavedSave": "씬에 저장",
+    "unsavedRevert": "원래 값으로 되돌리기",
+    "unsavedCancel": "취소",
+    "unsavedCloseMessage": "{0}에 저장되지 않은 편집이 있습니다. 저장(Save)하면 씬에 유지되고, 폐기(Discard)하면 원래 값으로 되돌립니다."
 }

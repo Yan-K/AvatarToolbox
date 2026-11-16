@@ -60,5 +60,7 @@
     "bseResetAllZero": "全部 → 0",
     "bseResetAllDefault": "全部 → 預設",
     "bseResetSelZero": "已選 → 0",
-    "bseResetSelDefault": "已選 → 預設"
+    "bseResetSelDefault": "已選 → 預設",
+    "bseAutoRoot": "自動",
+    "bseNoSMRAuto": "請在上方指定 SkinnedMeshRenderer。"
 }

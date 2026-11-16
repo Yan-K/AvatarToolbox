@@ -60,5 +60,7 @@
     "bseResetAllZero": "All → 0",
     "bseResetAllDefault": "All → Default",
     "bseResetSelZero": "Sel → 0",
-    "bseResetSelDefault": "Sel → Default"
+    "bseResetSelDefault": "Sel → Default",
+    "bseAutoRoot": "Auto",
+    "bseNoSMRAuto": "Assign a SkinnedMeshRenderer above to begin."
 }

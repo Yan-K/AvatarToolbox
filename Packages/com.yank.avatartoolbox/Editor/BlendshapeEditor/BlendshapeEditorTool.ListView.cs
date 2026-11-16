@@ -55,37 +55,12 @@ namespace YanK
 
 				EditorGUI.BeginChangeCheck();
 				float newVal = EditorGUILayout.Slider(globalBatchValue, 0f, 100f);
-				bool changed = EditorGUI.EndChangeCheck();
-
-				if (changed)
+				if (EditorGUI.EndChangeCheck())
 				{
-					// Register a single Undo at the start of a drag; continuous moves collapse into it.
-					if (batchDragSnapshot == null)
-					{
-						batchDragSnapshot = new Dictionary<int, float>();
-						foreach (var s in slots)
-						{
-							if (s.isSeparator || !s.selected) continue;
-							batchDragSnapshot[s.index] = s.current;
-						}
-						Undo.RegisterCompleteObjectUndo(targetRenderer, "YBE: Batch Value");
-					}
+					// Applied like an Inspector edit; Unity merges one drag into a single Undo step.
 					globalBatchValue = newVal;
-					foreach (var s in slots)
-					{
-						if (s.isSeparator || !s.selected) continue;
-						s.current = newVal;
-						targetRenderer.SetBlendShapeWeight(s.index, newVal);
-					}
-					EditorUtility.SetDirty(targetRenderer);
+					WriteWeights(s => s.selected, s => newVal, "YBE: Batch Value");
 				}
-				else
-				{
-					globalBatchValue = newVal;
-				}
-
-				if (Event.current.type == EventType.MouseUp)
-					batchDragSnapshot = null;
 
 				// Apply button: commits the current batch value and clears the checkbox selection
 				// so the next round of batch editing starts fresh (a common user trap).
@@ -102,19 +77,13 @@ namespace YanK
 		private void ApplyBatchAndClearSelection()
 		{
 			if (targetRenderer == null) return;
-			// Values are already written during slider drag; make sure at least one Undo step exists
-			// in case the user typed the value directly in the slider field without dragging.
-			Undo.RegisterCompleteObjectUndo(targetRenderer, "YBE: Batch Value Apply");
+			// Values are normally written while dragging; this also covers a value typed into the field.
+			WriteWeights(s => s.selected, s => globalBatchValue, "YBE: Batch Value Apply");
 			foreach (var s in slots)
 			{
-				if (s.isSeparator || !s.selected) continue;
-				s.current = globalBatchValue;
-				targetRenderer.SetBlendShapeWeight(s.index, globalBatchValue);
-				s.selected = false;
+				if (!s.isSeparator) s.selected = false;
 			}
-			EditorUtility.SetDirty(targetRenderer);
 			globalBatchValue = 0f;
-			batchDragSnapshot = null;
 			shiftAnchorDisplayIndex = -1;
 		}
 
@@ -259,7 +228,7 @@ namespace YanK
 
 		private void DrawSlotRow(BlendshapeSlot slot, List<BlendshapeSlot> displayed, int displayIndex)
 		{
-			bool isModified = !inPreview && Mathf.Abs(slot.current - slot.defaultValue) > 0.01f;
+			bool isModified = !inPreview && IsModified(slot, slot.current);
 			var style = isModified ? modifiedCardStyle : cardStyle;
 			EditorGUILayout.BeginHorizontal(style);
 
@@ -292,10 +261,9 @@ namespace YanK
 			float newVal = EditorGUILayout.Slider(slot.current, 0f, 100f);
 			if (EditorGUI.EndChangeCheck())
 			{
-				Undo.RegisterCompleteObjectUndo(targetRenderer, "YBE: Edit Blendshape");
-				slot.current = newVal;
-				targetRenderer.SetBlendShapeWeight(slot.index, newVal);
-				EditorUtility.SetDirty(targetRenderer);
+				WriteWeights(
+					new List<KeyValuePair<BlendshapeSlot, float>> { new KeyValuePair<BlendshapeSlot, float>(slot, newVal) },
+					"YBE: Edit Blendshape");
 			}
 			GUI.enabled = true;
 
@@ -360,17 +328,6 @@ namespace YanK
 			int c = 0;
 			foreach (var s in slots) if (!s.isSeparator && s.selected) c++;
 			return c;
-		}
-
-		private void RefreshCurrentFromRenderer()
-		{
-			if (targetRenderer == null || targetRenderer.sharedMesh == null) return;
-			for (int i = 0; i < slots.Count; i++)
-			{
-				var s = slots[i];
-				if (s.index < targetRenderer.sharedMesh.blendShapeCount)
-					s.current = targetRenderer.GetBlendShapeWeight(s.index);
-			}
 		}
 	}
 }

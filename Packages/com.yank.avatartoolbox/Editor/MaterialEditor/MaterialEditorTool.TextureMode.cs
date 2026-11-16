@@ -219,6 +219,11 @@ namespace YanK
 
 		private void ScanTextures()
 		{
+			// Keep checkbox / foldout state across rescans (undo, redo, include inactive...).
+			var previous = new Dictionary<Texture, TextureSlot>();
+			foreach (var s in textureSlots)
+				if (s.original != null && !previous.ContainsKey(s.original)) previous[s.original] = s;
+
 			textureSlots.Clear();
 			textureSelectAll = false;
 
@@ -245,10 +250,12 @@ namespace YanK
 				materials.Add(rootMat);
 			}
 
-			var seenTextures = new Dictionary<Texture, TextureSlot>();
+			var origins = BuildTextureOriginLookup();
+			// Grouped by (original, current), like material slots.
+			var seenTextures = new Dictionary<(Texture, Texture), TextureSlot>();
 			foreach (var material in materials)
 			{
-				if (material.shader == null) continue;
+				if (material == null || material.shader == null) continue;
 				var shader = material.shader;
 				int propCount = ShaderUtil.GetPropertyCount(shader);
 				for (int i = 0; i < propCount; i++)
@@ -260,15 +267,23 @@ namespace YanK
 					var texture = material.GetTexture(propName);
 					if (texture == null) continue;
 
-					if (!seenTextures.TryGetValue(texture, out var slot))
+					var original = GetOriginalTexture(origins, material, propName, texture);
+					if (!seenTextures.TryGetValue((original, texture), out var slot))
 					{
-						slot = new TextureSlot { current = texture, original = texture };
-						seenTextures[texture] = slot;
+						slot = new TextureSlot { current = texture, original = original };
+						if (previous.TryGetValue(original, out var prev))
+						{
+							slot.selected = prev.selected;
+							slot.foldout = prev.foldout;
+						}
+						seenTextures[(original, texture)] = slot;
 						textureSlots.Add(slot);
 					}
 					slot.usages.Add(new TextureUsageInfo { material = material, propertyName = propName });
 				}
 			}
+
+			UpdateTextureSelectAllState();
 		}
 
 		// --- Operations ---
@@ -283,6 +298,7 @@ namespace YanK
 				EditorUtility.SetDirty(usage.material);
 			}
 			slot.current = newTexture;
+			RefreshUnsavedState();
 			Repaint();
 		}
 

@@ -60,5 +60,7 @@
     "bseResetAllZero": "전체 → 0",
     "bseResetAllDefault": "전체 → 기본값",
     "bseResetSelZero": "선택 → 0",
-    "bseResetSelDefault": "선택 → 기본값"
+    "bseResetSelDefault": "선택 → 기본값",
+    "bseAutoRoot": "자동",
+    "bseNoSMRAuto": "위에서 SkinnedMeshRenderer를 지정하세요."
 }

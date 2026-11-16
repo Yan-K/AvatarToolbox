@@ -54,7 +54,7 @@ namespace YanK
 			{
 				case ExportMode.AllBlendshapes: return true;
 				case ExportMode.NonZero: return Mathf.Abs(s.current) > 0.001f;
-				case ExportMode.Modified: return Mathf.Abs(s.current - s.defaultValue) > 0.01f;
+				case ExportMode.Modified: return IsModified(s, s.current);
 				case ExportMode.CustomSelected: return s.selected;
 			}
 			return false;

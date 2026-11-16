@@ -12,5 +12,11 @@
     "updateSkipConfirmTitle": "略過更新",
     "updateSkipConfirmMessage": "這將隱藏更新提示，直到下一個版本發布。確定要略過此次更新嗎？",
     "updateSkipConfirmYes": "是，略過",
-    "updateSkipConfirmNo": "否，繼續提醒"
+    "updateSkipConfirmNo": "否，繼續提醒",
+    "unsavedTitle": "未儲存的編輯",
+    "unsavedMessage": "有未儲存的編輯。要繼續嗎？",
+    "unsavedSave": "儲存到場景",
+    "unsavedRevert": "還原為原始值",
+    "unsavedCancel": "取消",
+    "unsavedCloseMessage": "{0} 有未儲存的編輯。儲存（Save）會保留在場景中；捨棄（Discard）會還原為原始值。"
 }

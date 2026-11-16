@@ -24,7 +24,8 @@ Edit Materials and Textures in bulk.
 - **Bulk Material & Texture Management** — List, replace, clone, and reset materials and textures across all child renderers
 - **Search & Filter** — Quickly find materials by name or shader, and textures by name or property
 - **Batch Operations** — Select multiple items and clone, replace, or reset them all at once
-- **Modified Indicator** — Visual highlight on items that have been changed from their original
+- **Modified Indicator** — Visual highlight on items that have been changed from their original, kept through Undo/Redo and rescans until the root changes or the window closes
+- **Unsaved Edit Prompt** — Closing the window or changing the root with edits asks to Save to Scene, Revert to Original, or Cancel
 - **Include Inactive** — Optionally scan inactive GameObjects, with persistent toggle across sessions
 - **Confirmation Dialogs** — Destructive batch resets require confirmation to prevent accidents
 - **Undo Support** — All operations are fully undoable
@@ -34,6 +35,9 @@ Edit Materials and Textures in bulk.
 Drive 600+ blendshapes without losing your mind. 
 
 - **Auto Group Detection** — Parses separator rows like `===Eye===` / `---Mouth---` into wrapping, clickable group tabs
+- **Avatar Root Auto-Assign** — Dropping a Skinned Mesh Renderer finds its avatar root (avatar descriptor, else the outermost humanoid Animator); toggle with the green/red Auto button
+- **Animation Recording** — Sliders key blendshapes while the Animation window or Timeline is recording
+- **Modified Indicator & Unsaved Edit Prompt** — Edited rows stay highlighted through Undo/Redo; removing the target or closing the window with edits asks to Save to Scene, Revert to Original, or Cancel
 - **Search & Filter** — Instantly narrow down a long blendshape list by substring
 - **Batch Value Slider** — Real-time drive every selected blendshape with one slider, collapsed into a single Undo step
 - **Shift-Click Range Select** — Explorer-style range selection on the row checkboxes
@@ -190,6 +194,13 @@ YNC Change: better MatCap tint conversion.
 
 YSP Bug fix: fix packages failing to read or loading empty, when TAR member names start with ./ or folder .meta files omit folderAsset.
 YSP Bug fix: fix false GUID verification failures when importing a new embedded package.
+
+### v1.9.0 - 2026/11/16
+
+YBE Change: Avatar Root auto-assign. Dropping a Skinned Mesh Renderer finds its avatar root (avatar descriptor, else the outermost humanoid Animator). Toggle with the Auto button next to the field (green on, red off); the field is locked while it is on.
+YBE / YME Change: closing the window or removing/replacing the target with unsaved edits asks to Save to Scene, Revert to Original, or Cancel.
+YBE Bug fix: blendshape sliders, batch value, resets and clip import now record keyframes in the Animation window and Timeline, and save as prefab overrides.
+YBE / YME Bug fix: the edited (yellow) state and its revert value no longer reset after Undo/Redo, rescans or script reloads; originals now last until the target changes or the window closes.
 
 ## Credit
 

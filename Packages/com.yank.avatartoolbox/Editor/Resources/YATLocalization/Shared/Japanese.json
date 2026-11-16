@@ -12,5 +12,11 @@
     "updateSkipConfirmTitle": "アップデートをスキップ",
     "updateSkipConfirmMessage": "次のリリースまでアップデート通知が非表示になります。スキップしますか？",
     "updateSkipConfirmYes": "はい、スキップする",
-    "updateSkipConfirmNo": "いいえ、通知を続ける"
+    "updateSkipConfirmNo": "いいえ、通知を続ける",
+    "unsavedTitle": "未保存の編集",
+    "unsavedMessage": "未保存の編集があります。続行しますか？",
+    "unsavedSave": "シーンに保存",
+    "unsavedRevert": "元の値に戻す",
+    "unsavedCancel": "キャンセル",
+    "unsavedCloseMessage": "{0} に未保存の編集があります。保存（Save）するとシーンに残り、破棄（Discard）すると元の値に戻ります。"
 }

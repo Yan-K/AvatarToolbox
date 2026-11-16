@@ -60,5 +60,7 @@
     "bseResetAllZero": "全部 → 0",
     "bseResetAllDefault": "全部 → 初期値",
     "bseResetSelZero": "選択 → 0",
-    "bseResetSelDefault": "選択 → 初期値"
+    "bseResetSelDefault": "選択 → 初期値",
+    "bseAutoRoot": "自動",
+    "bseNoSMRAuto": "上の欄に SkinnedMeshRenderer を指定してください。"
 }
