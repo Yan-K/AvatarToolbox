@@ -21,6 +21,10 @@ namespace YanK
 			= new Dictionary<string, AssetContentFingerprint>(System.StringComparer.OrdinalIgnoreCase);
 		private readonly HashSet<string> contentMisses
 			= new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, bool> existsByPath
+			= new Dictionary<string, bool>(System.StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, bool> folderByPath
+			= new Dictionary<string, bool>(System.StringComparer.OrdinalIgnoreCase);
 
 		private SnapshotAssetProbe(
 			Dictionary<string, string> guidByPath,
@@ -49,7 +53,9 @@ namespace YanK
 
 			foreach (string path in allPaths)
 			{
-				if (string.IsNullOrEmpty(path))
+				// Package roots and ProjectSettings are imported by pathname, so the plan must
+				// not see their meta-less AssetDatabase GUIDs either.
+				if (string.IsNullOrEmpty(path) || ProjectPackagePath.IsPathManaged(path, true))
 					continue;
 				string guid = AssetDatabase.AssetPathToGUID(path);
 				if (string.IsNullOrEmpty(guid))
@@ -176,20 +182,38 @@ namespace YanK
 			return pathByGuid.TryGetValue(guid, out string path) ? path : null;
 		}
 
+		// Planning asks about the same parent folders for every file, so each answer is kept for
+		// the life of this snapshot, like its GUID map.
 		public bool ExistsAt(string path)
 		{
 			if (string.IsNullOrEmpty(path))
 				return false;
-			return ProjectPackagePath.TryGetAbsolutePath(projectRoot, path, out string absolute, out _)
+			lock (contentGate)
+			{
+				if (existsByPath.TryGetValue(path, out bool known))
+					return known;
+			}
+			bool exists = ProjectPackagePath.TryGetAbsolutePath(projectRoot, path, out string absolute, out _)
 				&& (File.Exists(absolute) || Directory.Exists(absolute) || File.Exists(absolute + ".meta"));
+			lock (contentGate)
+				existsByPath[path] = exists;
+			return exists;
 		}
 
 		public bool IsFolderAt(string path)
 		{
 			if (string.IsNullOrEmpty(path))
 				return false;
-			return ProjectPackagePath.TryGetAbsolutePath(projectRoot, path, out string absolute, out _)
+			lock (contentGate)
+			{
+				if (folderByPath.TryGetValue(path, out bool known))
+					return known;
+			}
+			bool folder = ProjectPackagePath.TryGetAbsolutePath(projectRoot, path, out string absolute, out _)
 				&& Directory.Exists(absolute);
+			lock (contentGate)
+				folderByPath[path] = folder;
+			return folder;
 		}
 
 		public bool TryGetContent(string path, out AssetContentFingerprint content)
@@ -260,7 +284,9 @@ namespace YanK
 				var before = new FileInfo(path);
 				long length = before.Length;
 				long lastWriteTicks = before.LastWriteTimeUtc.Ticks;
-				using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+				// Others may still rename or replace the file meanwhile (Unity's saves, the importer's
+				// moves); a writer keeps it unreadable, and any change makes it content-unknown below.
+				using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete))
 					hash = GuidUtility.ComputeSha256(stream);
 
 				var after = new FileInfo(path);

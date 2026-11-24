@@ -10,38 +10,26 @@ namespace YanK
 		private const long MaxPathnameBytes = 1024L * 1024L;
 		private const long MaxMetaBytes = 64L * 1024L * 1024L;
 
-		public static List<UnityPackageEntry> Read(string filePath)
+		// Metadata scan: reads pathnames and the comparatively small .meta members and
+		// fingerprints asset payloads. Reading meta is required to verify that the GUID used
+		// for preflight is the GUID that will actually be written. With a payload directory,
+		// the same pass also writes every asset and meta member there, so Import only moves files.
+		// Progress reports compressed bytes read.
+		public static List<UnityPackageEntry> ReadMetadata(string filePath, Action<long> progress = null,
+			Func<bool> cancelled = null, string payloadDirectory = null)
 		{
-			List<UnityPackageEntry> result = ReadMetadata(filePath);
-			var guids = new List<string>(result.Count);
-			for (int i = 0; i < result.Count; i++)
-				guids.Add(result[i].Guid);
-			Dictionary<string, LoadedAssetBytes> payloads = ReadBytesFor(filePath, guids);
-			for (int i = 0; i < result.Count; i++)
-			{
-				UnityPackageEntry entry = result[i];
-				if (!payloads.TryGetValue(entry.Guid, out LoadedAssetBytes payload))
-					continue;
-				entry.AssetBytes = payload.AssetBytes;
-				entry.MetaBytes = entry.HasMetaMember ? payload.MetaBytes : null;
-			}
-			return result;
-		}
-
-		// Metadata scan: reads pathnames and the comparatively small .meta members,
-		// but skips asset/preview payloads. Reading meta is required to verify that the
-		// GUID used for preflight is the GUID that will actually be written.
-		public static List<UnityPackageEntry> ReadMetadata(string filePath)
-		{
+			if (payloadDirectory != null)
+				Directory.CreateDirectory(payloadDirectory);
 			var map = new Dictionary<string, UnityPackageEntry>(StringComparer.OrdinalIgnoreCase);
 			var ordered = new List<UnityPackageEntry>();
 			try
 			{
-				using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-				using (var gz = new GZipStream(fs, CompressionMode.Decompress))
+				using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan))
+				using (var observed = new ProgressReadStream(fs, progress, cancelled))
+				using (var gz = new GZipStream(observed, CompressionMode.Decompress))
 				using (var buffered = new BufferedStream(gz, 64 * 1024))
 				{
-					var reader = new TarReader(buffered);
+					var reader = new TarReader(buffered, cancelled);
 					while (reader.MoveNext(out var entry))
 					{
 						if (!TrySplitMemberName(entry.Name, out string guid, out string kind))
@@ -76,6 +64,9 @@ namespace YanK
 							if (record.HasMetaMember)
 								throw new InvalidDataException("Duplicate asset.meta member for GUID " + guid);
 							byte[] meta = reader.ReadEntryBytes(MaxMetaBytes);
+							if (payloadDirectory != null)
+								using (var output = new FileStream(Path.Combine(payloadDirectory, guid + ".meta.payload"), FileMode.CreateNew, FileAccess.Write, FileShare.None))
+									output.Write(meta, 0, meta.Length);
 							record.HasMetaMember = true;
 							record.MetaGuid = GuidUtility.ExtractGuidFromMeta(meta);
 							record.IsFolder = GuidUtility.MetaDeclaresFolder(meta);
@@ -87,7 +78,11 @@ namespace YanK
 								throw new InvalidDataException("Duplicate asset member for GUID " + guid);
 							record.HasAssetMember = true;
 							record.Size = entry.Size;
-							record.AssetHash = reader.ReadEntrySha256();
+							if (payloadDirectory == null)
+								record.AssetHash = reader.ReadEntrySha256();
+							else
+								using (var output = new FileStream(Path.Combine(payloadDirectory, guid + ".asset.payload"), FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024))
+									record.AssetHash = reader.CopyEntryTo(output);
 						}
 						else
 						{
@@ -104,6 +99,11 @@ namespace YanK
 			{
 				throw new InvalidDataException("Not a valid .unitypackage: " + filePath, ex);
 			}
+			// Mono's native inflate reports damaged or non-gzip bytes as a plain IOException.
+			catch (IOException ex) when (ex.Message.StartsWith("Corrupted data", StringComparison.Ordinal))
+			{
+				throw new InvalidDataException("Not a valid .unitypackage: " + filePath + "\nCorrupted data.", ex);
+			}
 
 			var result = new List<UnityPackageEntry>(ordered.Count);
 			foreach (UnityPackageEntry record in ordered)
@@ -114,19 +114,21 @@ namespace YanK
 			return result;
 		}
 
-		// Re-reads the package and loads only the asset / asset.meta payloads for
-		// the requested GUIDs, skipping everything else to keep memory low.
-		public static Dictionary<string, LoadedAssetBytes> ReadBytesFor(string filePath, ICollection<string> guids)
+		// Re-reads the package and streams only the selected asset / asset.meta members into
+		// staging files, so no payload is held in memory. Import uses this when the payloads
+		// written during loading are gone.
+		public static Dictionary<string, StagedAssetPayload> StageSelected(
+			string filePath, ICollection<string> guids, string stagingDirectory)
 		{
-			var result = new Dictionary<string, LoadedAssetBytes>(StringComparer.OrdinalIgnoreCase);
+			var result = new Dictionary<string, StagedAssetPayload>(StringComparer.OrdinalIgnoreCase);
 			if (guids == null || guids.Count == 0)
 				return result;
-
+			Directory.CreateDirectory(stagingDirectory);
 			var wanted = new HashSet<string>(guids, StringComparer.OrdinalIgnoreCase);
 
 			try
 			{
-				using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+				using (var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan))
 				using (var gz = new GZipStream(fs, CompressionMode.Decompress))
 				using (var buffered = new BufferedStream(gz, 64 * 1024))
 				{
@@ -139,23 +141,28 @@ namespace YanK
 							reader.SkipEntry();
 							continue;
 						}
-						byte[] bytes = reader.ReadEntryBytes(kind == "asset.meta" ? MaxMetaBytes : int.MaxValue);
-						if (!result.TryGetValue(guid, out var record))
+						if (!result.TryGetValue(guid, out StagedAssetPayload payload))
 						{
-							record = new LoadedAssetBytes();
-							result[guid] = record;
+							payload = new StagedAssetPayload();
+							result[guid] = payload;
 						}
-						if (kind == "asset")
+						bool isMeta = kind == "asset.meta";
+						if ((isMeta ? payload.MetaPath : payload.AssetPath) != null)
+							throw new InvalidDataException("Duplicate " + kind + " member for GUID " + guid);
+						string path = Path.Combine(stagingDirectory, guid + (isMeta ? ".meta.payload" : ".asset.payload"));
+						string hash;
+						using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 64 * 1024))
+							hash = reader.CopyEntryTo(output, isMeta ? MaxMetaBytes : long.MaxValue);
+						if (isMeta)
 						{
-							if (record.AssetBytes != null)
-								throw new InvalidDataException("Duplicate asset member for GUID " + guid);
-							record.AssetBytes = bytes;
+							payload.MetaPath = path;
+							payload.MetaHash = hash;
 						}
 						else
 						{
-							if (record.MetaBytes != null)
-								throw new InvalidDataException("Duplicate asset.meta member for GUID " + guid);
-							record.MetaBytes = bytes;
+							payload.AssetPath = path;
+							payload.AssetHash = hash;
+							payload.AssetSize = entry.Size;
 						}
 					}
 				}
@@ -167,6 +174,10 @@ namespace YanK
 			catch (EndOfStreamException ex)
 			{
 				throw new InvalidDataException("Not a valid .unitypackage: " + filePath, ex);
+			}
+			catch (IOException ex) when (ex.Message.StartsWith("Corrupted data", StringComparison.Ordinal))
+			{
+				throw new InvalidDataException("Not a valid .unitypackage: " + filePath + "\nCorrupted data.", ex);
 			}
 
 			return result;
@@ -205,6 +216,10 @@ namespace YanK
 
 			if (record.IsPathManaged)
 			{
+				// Unity exports an embedded package's root with only a pathname, and a root's
+				// .meta may omit folderAsset. Like Unity, such an entry without an asset is a folder.
+				if (!record.HasAssetMember && (!record.HasMetaMember || ProjectPackagePath.IsPackageRoot(normalized)))
+					record.IsFolder = true;
 				if (!record.HasAssetMember && !record.IsFolder)
 					throw new InvalidDataException("Path-managed project entry has no payload and is not a folder: " + normalized);
 
@@ -234,11 +249,50 @@ namespace YanK
 			if (!record.HasAssetMember)
 				record.IsFolder = true;
 		}
+
+		// Reports compressed bytes read and stops the scan when cancelled. It does not own the source.
+		private sealed class ProgressReadStream : Stream
+		{
+			private readonly Stream source;
+			private readonly Action<long> progress;
+			private readonly Func<bool> cancelled;
+			private long bytesRead;
+
+			public ProgressReadStream(Stream source, Action<long> progress, Func<bool> cancelled)
+			{
+				this.source = source;
+				this.progress = progress;
+				this.cancelled = cancelled;
+			}
+
+			public override int Read(byte[] buffer, int offset, int count)
+			{
+				if (cancelled != null && cancelled()) throw new OperationCanceledException();
+				int read = source.Read(buffer, offset, count);
+				bytesRead += read;
+				progress?.Invoke(bytesRead);
+				return read;
+			}
+
+			public override bool CanRead => true;
+			public override bool CanSeek => false;
+			public override bool CanWrite => false;
+			public override long Length => throw new NotSupportedException();
+			public override long Position { get => bytesRead; set => throw new NotSupportedException(); }
+			public override void Flush() { }
+			public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+			public override void SetLength(long value) => throw new NotSupportedException();
+			public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+		}
 	}
 
-	public sealed class LoadedAssetBytes
+	// Staged asset and meta files for one package GUID, with the SHA-256 they were written with.
+	public sealed class StagedAssetPayload
 	{
-		public byte[] AssetBytes;
-		public byte[] MetaBytes;
+		public string AssetPath;
+		public string MetaPath;
+		public string AssetHash;
+		public string MetaHash;
+		public long AssetSize;
 	}
 }

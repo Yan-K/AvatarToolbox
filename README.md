@@ -69,7 +69,7 @@ Dependency-aware `.unitypackage` exporter and importer in one tabbed window.
 - **Folder Collection Modes** — KeepStructure / AutoOrganize / SingleFolder / Custom, in either Non-Destructive (path remap on export) or Destructive (project move + restore manifest) mode
 - **Custom Bucket Overrides** — Per-folder or per-asset bucket assignment with inheritance, batch tools, and persistent overrides
 - **Multi-File Importer** — Drag-and-drop multiple `.unitypackage` files, preview entries, partial import with original GUIDs preserved
-- **Conflict Detection** — Per-entry New / Update / Path conflict / GUID conflict status with Overwrite / Skip / Ask policy
+- **Conflict Detection** — Per-entry New / Identical / Update / GUID Conflict / Path Taken / Blocked status with Overwrite / Skip / Ask policy
 
 ### NonToon Converter
 
@@ -201,6 +201,17 @@ YBE Change: Avatar Root auto-assign. Dropping a Skinned Mesh Renderer finds its 
 YBE / YME Change: closing the window or removing/replacing the target with unsaved edits asks to Save to Scene, Revert to Original, or Cancel.
 YBE Bug fix: blendshape sliders, batch value, resets and clip import now record keyframes in the Animation window and Timeline, and save as prefab overrides.
 YBE / YME Bug fix: the edited (yellow) state and its revert value no longer reset after Undo/Redo, rescans or script reloads; originals now last until the target changes or the window closes.
+
+### v1.10.0 - 2026/11/24
+
+YSP Change: big packages import much faster. Hashing uses Windows' own SHA-256, files are unpacked to disk while a package loads instead of being held in memory, and Import moves them into place.
+YSP Change: the import list stays smooth with thousands of files. Only the rows on screen are drawn and conflicts are checked in the background, so a checkbox click no longer freezes the window.
+YSP Change: with Conflict Action set to Ask, updating a file you already have (same GUID and path) no longer asks, like Unity's own importer. Badges and counts now tell Update, GUID Conflict, Path Taken and Blocked apart; hover a Blocked badge to see why.
+YSP Change: a successful import no longer opens a window. When something fails, a window lists each failed file and why, and one failed file no longer stops the rest.
+YSP Change: loading a package shows in Unity's background tasks, with Cancel. Arrow keys and Space work in the import list, and rows show their full path on hover.
+YSP Bug fix: files whose paths come close to Windows' 260-character limit no longer fail to import.
+YSP Bug fix: ProjectSettings files and embedded package folders no longer show as conflicts, and packages that include an embedded package's root folder now load.
+YBE Bug fix: Avatar Toolbox now compiles on Unity 6.6.
 
 ## Credit
 

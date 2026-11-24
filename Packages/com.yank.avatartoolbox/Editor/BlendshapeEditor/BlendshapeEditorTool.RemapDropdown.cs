@@ -40,8 +40,10 @@ namespace YanK
 				root.AddChild(new BlendshapeSlotDropdownItem(ignoreLabel, -1));
 				root.AddSeparator();
 
-				// Preserve insertion order of groups as encountered in the slots list.
-				var groupItems = new Dictionary<string, AdvancedDropdownItem>();
+				// Preserve insertion order of groups as encountered in the slots list. Each group's
+				// items are kept here rather than read back from a parent item: Unity 6.6 turned
+				// AdvancedDropdownItem.children into an error, and its replacement is 6.6-only.
+				var groupItems = new Dictionary<string, List<AdvancedDropdownItem>>();
 				var groupOrder = new List<string>();
 
 				for (int i = 0; i < allSlots.Count; i++)
@@ -50,26 +52,28 @@ namespace YanK
 					if (s.isSeparator) continue;
 
 					string gKey = string.IsNullOrEmpty(s.groupName) ? GroupGeneralKey : s.groupName;
-					string display = gKey == GroupGeneralKey ? groupGeneralDisplay : gKey;
-
-					if (!groupItems.TryGetValue(gKey, out var parent))
+					if (!groupItems.TryGetValue(gKey, out var items))
 					{
-						parent = new AdvancedDropdownItem(display);
-						groupItems[gKey] = parent;
+						items = new List<AdvancedDropdownItem>();
+						groupItems[gKey] = items;
 						groupOrder.Add(gKey);
 					}
-					parent.AddChild(new BlendshapeSlotDropdownItem(s.name, i));
+					items.Add(new BlendshapeSlotDropdownItem(s.name, i));
 				}
 
 				// If the only group is "General", flatten so the user doesn't have to click a submenu.
 				if (groupOrder.Count == 1)
 				{
-					var only = groupItems[groupOrder[0]];
-					foreach (var child in only.children) root.AddChild(child);
+					foreach (var item in groupItems[groupOrder[0]]) root.AddChild(item);
 				}
 				else
 				{
-					foreach (var g in groupOrder) root.AddChild(groupItems[g]);
+					foreach (var g in groupOrder)
+					{
+						var parent = new AdvancedDropdownItem(g == GroupGeneralKey ? groupGeneralDisplay : g);
+						foreach (var item in groupItems[g]) parent.AddChild(item);
+						root.AddChild(parent);
+					}
 				}
 
 				return root;

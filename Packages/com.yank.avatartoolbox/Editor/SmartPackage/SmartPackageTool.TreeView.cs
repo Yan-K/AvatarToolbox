@@ -14,8 +14,32 @@ namespace YanK
 		private const float TreeIconWidth = 18f;
 		private const float TreeSizeWidth = 70f;
 
+		private static readonly Color NewColor = new Color(0.30f, 0.70f, 0.30f, 0.85f);
+		private static readonly Color IdenticalColor = new Color(0.25f, 0.50f, 0.90f, 0.85f);
+		private static readonly Color UpdateColor = new Color(0.80f, 0.52f, 0.10f, 0.90f);
+		private static readonly Color ConflictColor = new Color(0.85f, 0.20f, 0.20f, 0.90f);
+
 		private static GUIStyle s_RowName;
+		private static GUIStyle s_ImporterRowName;
 		private static GUIStyle s_RowSize;
+
+		// Importer trees draw only the rows inside the scroll view, from a flat list rebuilt on Layout.
+		private struct FlatRow
+		{
+			public PackageAssetNode Node;
+			public int Depth;
+		}
+
+		private readonly Dictionary<PackageAssetNode, List<FlatRow>> flatTrees = new Dictionary<PackageAssetNode, List<FlatRow>>();
+		private readonly Dictionary<PackageAssetNode, float> treeTops = new Dictionary<PackageAssetNode, float>();
+		// Every importer row in display order, including rows outside the view, for the arrow keys.
+		private readonly List<PackageAssetNode> visibleRows = new List<PackageAssetNode>();
+		private readonly Dictionary<PackageAssetNode, string> treeControlNames = new Dictionary<PackageAssetNode, string>();
+		private readonly Dictionary<PackageAssetNode, PackageAssetNode.ToggleState> treeStates = new Dictionary<PackageAssetNode, PackageAssetNode.ToggleState>();
+		private readonly Dictionary<ImportConflictKind, float> badgeWidths = new Dictionary<ImportConflictKind, float>();
+		private int treeStateVersion = -1;
+		private string badgeLanguage;
+		private bool treeKeyboardFocus;
 
 		private static GUIStyle RowNameStyle
 		{
@@ -24,6 +48,16 @@ namespace YanK
 				if (s_RowName == null)
 					s_RowName = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft };
 				return s_RowName;
+			}
+		}
+
+		private static GUIStyle ImporterRowNameStyle
+		{
+			get
+			{
+				if (s_ImporterRowName == null)
+					s_ImporterRowName = new GUIStyle(EditorStyles.label) { alignment = TextAnchor.MiddleLeft, clipping = TextClipping.Clip };
+				return s_ImporterRowName;
 			}
 		}
 
@@ -42,9 +76,177 @@ namespace YanK
 			}
 		}
 
-		private Rect DrawRowCore(PackageAssetNode node, int depth, float tailWidth)
+		// A folder's checkbox state, computed once per selection change instead of walking its
+		// subtree for every drawn row on every event.
+		private PackageAssetNode.ToggleState GetTreeState(PackageAssetNode node)
 		{
-			Rect row = GUILayoutUtility.GetRect(0, RowHeight, GUILayout.Height(RowHeight), GUILayout.ExpandWidth(true));
+			if (treeStateVersion != importerCheckVersion)
+			{
+				treeStates.Clear();
+				treeStateVersion = importerCheckVersion;
+			}
+			if (treeStates.TryGetValue(node, out PackageAssetNode.ToggleState state))
+				return state;
+			state = node.IsChecked ? PackageAssetNode.ToggleState.Checked : PackageAssetNode.ToggleState.Unchecked;
+			if (node.IsFolder && node.Children.Count > 0)
+			{
+				state = GetTreeState(node.Children[0]);
+				for (int i = 1; i < node.Children.Count && state != PackageAssetNode.ToggleState.Mixed; i++)
+					if (GetTreeState(node.Children[i]) != state)
+						state = PackageAssetNode.ToggleState.Mixed;
+			}
+			treeStates[node] = state;
+			return state;
+		}
+
+		// Drops what the rows of a removed package (or of every package) kept for drawing.
+		private void ForgetTreeRows(PackageAssetNode root = null)
+		{
+			if (root == null)
+			{
+				flatTrees.Clear();
+				treeTops.Clear();
+			}
+			else
+			{
+				flatTrees.Remove(root);
+				treeTops.Remove(root);
+			}
+			treeControlNames.Clear();
+			treeStates.Clear();
+			treeStateVersion = -1;
+			treeKeyboardFocus = false;
+		}
+
+		private string TreeControlName(PackageAssetNode node)
+		{
+			if (!treeControlNames.TryGetValue(node, out string name))
+			{
+				name = "YSPImportTree:" + treeControlNames.Count;
+				treeControlNames.Add(node, name);
+			}
+			return name;
+		}
+
+		// Arrow keys move the highlight, Left and Right fold, Space toggles. Runs before the
+		// package list draws, using the row order the previous event drew.
+		private void BeginTreeGUI()
+		{
+			Event current = Event.current;
+			// A highlighted row scrolled out of view is not drawn, so its focused control has no name.
+			string focused = GUI.GetNameOfFocusedControl();
+			// A highlighted row hidden by a fold takes no keys.
+			int index = importerHighlightNode == null ? -1 : visibleRows.IndexOf(importerHighlightNode);
+			if (treeKeyboardFocus && index >= 0 && current.type == EventType.KeyDown
+				&& (focused.Length == 0 || focused.StartsWith("YSPImportTree:", StringComparison.Ordinal))
+				&& !EditorGUIUtility.editingTextField)
+			{
+				bool handled = true;
+				switch (current.keyCode)
+				{
+					case KeyCode.UpArrow:
+						if (index > 0)
+							importerHighlightNode = visibleRows[index - 1];
+						RevealHighlight();
+						break;
+					case KeyCode.DownArrow:
+						if (index >= 0 && index + 1 < visibleRows.Count)
+							importerHighlightNode = visibleRows[index + 1];
+						RevealHighlight();
+						break;
+					case KeyCode.LeftArrow:
+						if (importerHighlightNode.IsFolder && importerHighlightNode.IsExpanded && importerHighlightNode.Children.Count > 0)
+							importerHighlightNode.IsExpanded = false;
+						else if (importerHighlightNode.Parent != null && !string.IsNullOrEmpty(importerHighlightNode.Parent.FullPath))
+							importerHighlightNode = importerHighlightNode.Parent;
+						RevealHighlight();
+						break;
+					case KeyCode.RightArrow:
+						if (importerHighlightNode.IsFolder)
+							importerHighlightNode.IsExpanded = true;
+						break;
+					case KeyCode.Space:
+						importerHighlightNode.SetChecked(GetTreeState(importerHighlightNode) != PackageAssetNode.ToggleState.Checked, true);
+						RefreshImporterConflictPreview(false);
+						break;
+					default:
+						handled = false;
+						break;
+				}
+				if (handled)
+				{
+					current.Use();
+					Repaint();
+				}
+			}
+			visibleRows.Clear();
+		}
+
+		private void RevealHighlight()
+		{
+			foreach (KeyValuePair<PackageAssetNode, List<FlatRow>> tree in flatTrees)
+			{
+				int index = tree.Value.FindIndex(row => row.Node == importerHighlightNode);
+				if (index < 0 || !treeTops.TryGetValue(tree.Key, out float top))
+					continue;
+				float y = top + index * RowHeight;
+				if (y < importerScroll.y)
+					importerScroll.y = y;
+				else if (y + RowHeight > importerScroll.y + importerViewHeight)
+					importerScroll.y = y + RowHeight - importerViewHeight;
+				return;
+			}
+		}
+
+		private void HighlightRow(PackageAssetNode node)
+		{
+			importerHighlightNode = node;
+			treeKeyboardFocus = true;
+			GUI.FocusControl(TreeControlName(node));
+			Repaint();
+		}
+
+		private void DrawVirtualTree(PackageAssetNode root, Dictionary<string, ImportConflict> conflicts)
+		{
+			if (!flatTrees.TryGetValue(root, out List<FlatRow> rows) || Event.current.type == EventType.Layout)
+			{
+				if (rows == null)
+					flatTrees[root] = rows = new List<FlatRow>();
+				rows.Clear();
+				Flatten(root, 0, rows);
+			}
+			foreach (FlatRow row in rows)
+				visibleRows.Add(row.Node);
+			Rect block = GUILayoutUtility.GetRect(0f, rows.Count * RowHeight, GUILayout.ExpandWidth(true));
+			if (Event.current.type == EventType.Repaint)
+				treeTops[root] = block.y;
+			// The last repaint's position keeps the drawn slice identical across a frame's events.
+			float top = treeTops.TryGetValue(root, out float known) ? known : 0f;
+			int first = Mathf.Max(0, Mathf.FloorToInt((importerScroll.y - top) / RowHeight) - 1);
+			int last = Mathf.Min(rows.Count, Mathf.CeilToInt((importerScroll.y + importerViewHeight - top) / RowHeight) + 1);
+			for (int i = first; i < last; i++)
+				DrawNodeRow(rows[i].Node, rows[i].Depth, conflicts, new Rect(block.x, block.y + i * RowHeight, block.width, RowHeight));
+		}
+
+		private static void Flatten(PackageAssetNode node, int depth, List<FlatRow> rows)
+		{
+			// BuildProjectTree uses a synthetic container so project-root files and all
+			// real top-level folders can share one tree. It is not part of the package.
+			if (node.Parent == null && string.IsNullOrEmpty(node.FullPath))
+			{
+				foreach (PackageAssetNode topLevel in node.Children)
+					Flatten(topLevel, depth, rows);
+				return;
+			}
+			rows.Add(new FlatRow { Node = node, Depth = depth });
+			if (node.IsFolder && node.IsExpanded)
+				foreach (PackageAssetNode child in node.Children)
+					Flatten(child, depth + 1, rows);
+		}
+
+		private Rect DrawRowCore(PackageAssetNode node, int depth, float tailWidth, Rect? placed = null)
+		{
+			Rect row = placed ?? GUILayoutUtility.GetRect(0, RowHeight, GUILayout.Height(RowHeight), GUILayout.ExpandWidth(true));
 			bool importer = currentTab == SmartPackageTab.Importer;
 
 			// Whole-row highlight (importer only) so the user can trace a row across
@@ -53,28 +255,50 @@ namespace YanK
 				EditorGUI.DrawRect(row, new Color(0.24f, 0.48f, 0.90f, 0.20f));
 
 			float midY = row.y + (RowHeight - 16f) * 0.5f;
-			float x = row.x + depth * TreeIndentWidth;
+			float indent = depth * TreeIndentWidth;
+			// Deep importer trees keep the checkbox and the badge inside narrow windows.
+			if (importer)
+				indent = Mathf.Min(indent, Mathf.Max(0f, row.width - tailWidth - TreeFoldoutWidth - TreeToggleWidth - TreeIconWidth - 36f));
+			float x = row.x + indent;
 
 			Rect foldoutR = new Rect(x, midY, TreeFoldoutWidth, 16f);
 			if (node.IsFolder && node.Children.Count > 0)
 			{
 				bool nx = EditorGUI.Foldout(foldoutR, node.IsExpanded, GUIContent.none, true);
 				if (nx != node.IsExpanded)
+				{
 					node.IsExpanded = nx;
+					// Keys then act on the row whose arrow was clicked, never an earlier highlighted row.
+					if (importer)
+						HighlightRow(node);
+				}
 			}
 			x += TreeFoldoutWidth;
 
 			Rect toggleR = new Rect(x, midY, TreeToggleWidth, 16f);
-			PackageAssetNode.ToggleState state = node.GetState();
+			PackageAssetNode.ToggleState state = importer ? GetTreeState(node) : node.GetState();
 			bool prevMixed = EditorGUI.showMixedValue;
 			EditorGUI.showMixedValue = state == PackageAssetNode.ToggleState.Mixed;
 			bool prevChecked = state == PackageAssetNode.ToggleState.Checked;
-			bool nv = EditorGUI.Toggle(toggleR, prevChecked);
-			EditorGUI.showMixedValue = prevMixed;
+			bool nv;
+			try
+			{
+				if (importer)
+					GUI.SetNextControlName(TreeControlName(node));
+				nv = EditorGUI.Toggle(toggleR, prevChecked);
+			}
+			finally
+			{
+				EditorGUI.showMixedValue = prevMixed;
+			}
 			if (nv != prevChecked)
 			{
+				if (importer)
+				{
+					importerHighlightNode = node;
+					treeKeyboardFocus = true;
+				}
 				node.SetChecked(nv, true);
-				node.Parent?.RecomputeFromChildren();
 				OnRowCheckChanged();
 			}
 			x += TreeToggleWidth + 2f;
@@ -88,21 +312,30 @@ namespace YanK
 			}
 			x += TreeIconWidth + 2f;
 
-			float nameRight = row.xMax - tailWidth;
-			if (nameRight < x + 20f) nameRight = x + 20f;
+			float nameRight;
+			if (importer)
+			{
+				nameRight = Mathf.Max(x, row.xMax - tailWidth - 2f);
+				// The full path tells apart files with the same name in different folders.
+				GUI.Label(new Rect(x, row.y, nameRight - x, RowHeight), new GUIContent(node.Name, node.FullPath), ImporterRowNameStyle);
+			}
+			else
+			{
+				nameRight = row.xMax - tailWidth;
+				if (nameRight < x + 20f) nameRight = x + 20f;
+				GUI.Label(new Rect(x, row.y, nameRight - x, RowHeight), node.Name, RowNameStyle);
+			}
 			Rect nameR = new Rect(x, row.y, nameRight - x, RowHeight);
-			GUI.Label(nameR, node.Name, RowNameStyle);
 
 			// Click the name area to highlight the whole row (importer only).
 			if (importer && Event.current.type == EventType.MouseDown && Event.current.button == 0
 				&& nameR.Contains(Event.current.mousePosition))
 			{
-				importerHighlightNode = node;
-				Repaint();
+				HighlightRow(node);
 				Event.current.Use();
 			}
 
-			return new Rect(nameRight, row.y, tailWidth, RowHeight);
+			return new Rect(importer ? row.xMax - tailWidth : nameRight, row.y, tailWidth, RowHeight);
 		}
 
 		// Called when a row checkbox changes. Keeps the exporter preview behaviour
@@ -250,109 +483,73 @@ namespace YanK
 			return (bytes / (1024f * 1024f * 1024f)).ToString("0.0") + " GB";
 		}
 
-		// Importer variant: no exporter filters; draws conflict badge per leaf (only
-		// when checked) and an aggregate badge on folders containing checked conflicts.
-		private void DrawNode(PackageAssetNode node, int depth, Dictionary<string, ImportConflict> conflictByPath)
+		// Importer row: a badge per checked leaf, and on a folder the kind that most needs
+		// a look among its checked contents.
+		private void DrawNodeRow(PackageAssetNode node, int depth, Dictionary<string, ImportConflict> conflictByPath, Rect placed)
 		{
-			if (node == null) return;
-			// BuildProjectTree uses a synthetic container so project-root files and all
-			// real top-level folders can share one tree. It is not part of the package.
-			if (node.Parent == null && string.IsNullOrEmpty(node.FullPath))
-			{
-				List<PackageAssetNode> topLevel = node.Children;
-				for (int i = 0; i < topLevel.Count; i++)
-					DrawNode(topLevel[i], depth, conflictByPath);
-				return;
-			}
-
 			ImportConflictKind badgeKind = default;
-			bool hasBadge = false;
+			string badgeTip = null;
+			bool hasBadge = true;
 			if (node.IsFolder)
 			{
-				if (node.HasCheckedGuidConflict || node.HasCheckedPathConflict || node.HasCheckedUpdate)
-				{
-					badgeKind = ImportConflictKind.GuidConflict;
-					hasBadge = true;
-				}
-				else if (node.HasCheckedDuplicate) { badgeKind = ImportConflictKind.Duplicate; hasBadge = true; }
+				if (node.HasCheckedBlocked) badgeKind = ImportConflictKind.Blocked;
+				else if (node.HasCheckedPathConflict) badgeKind = ImportConflictKind.PathConflict;
+				else if (node.HasCheckedGuidConflict) badgeKind = ImportConflictKind.GuidConflict;
+				else if (node.HasCheckedUpdate) badgeKind = ImportConflictKind.Update;
+				else if (node.HasCheckedDuplicate) badgeKind = ImportConflictKind.Duplicate;
+				else hasBadge = false;
 			}
 			else if (node.IsChecked && conflictByPath != null && conflictByPath.TryGetValue(node.FullPath, out ImportConflict c)
 				&& !(c.Kind == ImportConflictKind.Duplicate && c.ExistingFromProject))
 			{
-				badgeKind = VisibleBadgeKind(c.Kind);
-				hasBadge = true;
+				badgeKind = c.Kind;
+				// A blocked file says why on its badge.
+				badgeTip = c.Kind == ImportConflictKind.Blocked ? c.Message : null;
+			}
+			else
+			{
+				hasBadge = false;
 			}
 
 			float badgeW = hasBadge ? GetBadgeWidth(badgeKind) : 0f;
-
-			Rect tail = DrawRowCore(node, depth, badgeW);
+			Rect tail = DrawRowCore(node, depth, badgeW, placed);
 			if (hasBadge)
 			{
 				Rect badgeR = new Rect(tail.x, tail.y + (RowHeight - 16f) * 0.5f, badgeW, 16f);
-				DrawConflictBadge(badgeR, badgeKind);
-			}
-
-			if (node.IsFolder && node.IsExpanded)
-			{
-				// Children were sorted once at load time; iterate directly.
-				List<PackageAssetNode> kids = node.Children;
-				for (int i = 0; i < kids.Count; i++)
-					DrawNode(kids[i], depth + 1, conflictByPath);
+				DrawConflictBadge(badgeR, badgeKind, badgeTip);
 			}
 		}
 
 		private float GetBadgeWidth(ImportConflictKind kind)
 		{
-			string label = BadgeLabel(kind);
-			GUIContent c = new GUIContent(label);
-			return EditorStyles.miniLabel.CalcSize(c).x + 12f;
+			// Widths follow the label language.
+			if (badgeLanguage != YanKLocalization.CurrentLanguage)
+			{
+				badgeWidths.Clear();
+				badgeLanguage = YanKLocalization.CurrentLanguage;
+			}
+			if (!badgeWidths.TryGetValue(kind, out float width))
+				badgeWidths[kind] = width = EditorStyles.miniLabel.CalcSize(new GUIContent(ImportConflictLabels.Kind(kind))).x + 12f;
+			return width;
 		}
 
-		private string BadgeLabel(ImportConflictKind kind)
+		private static Color BadgeColor(ImportConflictKind kind)
 		{
 			switch (kind)
 			{
-				case ImportConflictKind.New: return L("yspConflictNew", "New");
-				case ImportConflictKind.Duplicate: return L("yspConflictIdentical", "Identical");
-				case ImportConflictKind.Update:
-				case ImportConflictKind.PathConflict:
-				case ImportConflictKind.GuidConflict:
-					return L("yspConflictGuid", "GUID Conflict");
-				default: return kind.ToString();
+				case ImportConflictKind.New: return NewColor;
+				case ImportConflictKind.Duplicate: return IdenticalColor;
+				case ImportConflictKind.Update: return UpdateColor;
+				default: return ConflictColor;
 			}
 		}
 
-		private static ImportConflictKind VisibleBadgeKind(ImportConflictKind kind)
+		private static void DrawConflictBadge(Rect r, ImportConflictKind kind, string tooltip)
 		{
-			if (kind == ImportConflictKind.New || kind == ImportConflictKind.Duplicate)
-				return kind;
-			return ImportConflictKind.GuidConflict;
-		}
-
-		private void DrawConflictBadge(Rect r, ImportConflictKind kind)
-		{
-			string label = BadgeLabel(kind);
-			Color bg;
-			switch (kind)
-			{
-				case ImportConflictKind.New:
-					bg = new Color(0.30f, 0.70f, 0.30f, 0.85f);
-					break;
-				case ImportConflictKind.Duplicate:
-					bg = new Color(0.25f, 0.50f, 0.90f, 0.85f);
-					break;
-				case ImportConflictKind.Update:
-				case ImportConflictKind.PathConflict:
-				case ImportConflictKind.GuidConflict:
-					bg = new Color(0.85f, 0.20f, 0.20f, 0.90f);
-					break;
-				default:
-					bg = new Color(0.5f, 0.5f, 0.5f, 0.85f);
-					break;
-			}
-
-			EditorGUI.DrawRect(r, bg);
-			GUI.Label(r, label, EditorStyles.whiteMiniLabel);
+			if (Event.current.type != EventType.Repaint)
+				return;
+			EditorGUI.DrawRect(r, BadgeColor(kind));
+			GUI.Label(r, new GUIContent(ImportConflictLabels.Kind(kind), tooltip), EditorStyles.whiteMiniLabel);
 		}
 	}
 }

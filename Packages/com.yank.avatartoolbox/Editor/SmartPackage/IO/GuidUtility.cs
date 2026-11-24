@@ -67,15 +67,23 @@ namespace YanK
 
 		public static string ComputeSha256(byte[] bytes)
 		{
-			using (SHA256 sha = SHA256.Create())
+			using (SHA256 sha = FastSha256.Create())
 				return Convert.ToBase64String(sha.ComputeHash(bytes ?? Array.Empty<byte>()));
 		}
 
 		public static string ComputeSha256(Stream stream)
 		{
 			if (stream == null) throw new ArgumentNullException(nameof(stream));
-			using (SHA256 sha = SHA256.Create())
-				return Convert.ToBase64String(sha.ComputeHash(stream));
+			using (SHA256 sha = FastSha256.Create())
+			{
+				// ComputeHash(Stream) hashes 4 KB at a time; larger blocks keep native calls few.
+				byte[] buffer = new byte[64 * 1024];
+				int read;
+				while ((read = stream.Read(buffer, 0, buffer.Length)) > 0)
+					sha.TransformBlock(buffer, 0, read, null, 0);
+				sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
+				return Convert.ToBase64String(sha.Hash);
+			}
 		}
 	}
 }

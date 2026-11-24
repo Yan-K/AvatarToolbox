@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 namespace YanK
 {
@@ -14,6 +16,12 @@ namespace YanK
 		PartiallyFailed
 	}
 
+	public struct ImportFailure
+	{
+		public string Path;
+		public string Reason;
+	}
+
 	public sealed class ImportRunResult
 	{
 		public ImportRunStatus Status;
@@ -22,7 +30,10 @@ namespace YanK
 		public int IdenticalSkipped;
 		public int PolicySkipped;
 		public int Failed;
-		public int NotAttempted;
+		// What failed and why; Failed counts these.
+		public readonly List<ImportFailure> Failures = new List<ImportFailure>();
+		// Targets that now hold the package's content, for Show in Project.
+		public readonly List<string> ImportedPaths = new List<string>();
 		public int Skipped => IdenticalSkipped + PolicySkipped;
 		public bool ShouldClear => Status == ImportRunStatus.Succeeded;
 	}
@@ -41,6 +52,25 @@ namespace YanK
 		private static string L(string key, string defaultValue)
 		{
 			return YanKLocalization.L(key, defaultValue);
+		}
+
+		// Payloads live in a short folder inside the project's Temp, on the same drive as the
+		// targets so they can be moved into place. Unity also clears Temp when it closes.
+		public static string StagingRoot(string projectRoot)
+		{
+			return Path.Combine(projectRoot, "Temp", "YanKSmartPackage");
+		}
+
+		// Deletes a folder this importer made under its staging root, without following links.
+		public static void DeleteStaging(string projectRoot, string directory)
+		{
+			if (string.IsNullOrEmpty(directory) || string.IsNullOrEmpty(projectRoot))
+				return;
+			string root = Path.GetFullPath(StagingRoot(projectRoot)).TrimEnd(Path.DirectorySeparatorChar);
+			string path = Path.GetFullPath(directory).TrimEnd(Path.DirectorySeparatorChar);
+			if (path != root && !path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+				return;
+			DeleteOwnedTree(path);
 		}
 
 		private enum ConflictDecision
@@ -170,6 +200,13 @@ namespace YanK
 			SnapshotAssetProbe snapshot = SnapshotAssetProbe.Capture(
 				includeContent: true,
 				contentUnknownPaths: contentUnknownPaths);
+			string projectRoot = Directory.GetParent(Application.dataPath).FullName;
+
+			// A blocked entry stops the whole run, so find that out before asking anything.
+			ImportPlan preflight = ImportPlanBuilder.Build(packageList, snapshot, policy);
+			if (preflight.OrderedItems.Count > 0 && !preflight.CanApply)
+				return Blocked(result, projectRoot, preflight);
+
 			ImportPlan plan = ImportPlanBuilder.Build(packageList, snapshot, policy, item =>
 			{
 				if (overwriteAll)
@@ -183,10 +220,9 @@ namespace YanK
 				string existingGuid = string.IsNullOrEmpty(conflict.ExistingGuid)
 					? L("yspConflictNone", "(none)")
 					: conflict.ExistingGuid;
-				string conflictKind = L("yspConflictGuid", "GUID Conflict");
 				string message = string.Format(
 					L("yspConflictDetails", "Kind: {0}\nIncoming: {1}\nIncoming GUID: {2}\nTarget: {3}\nExisting GUID: {4}"),
-					conflictKind,
+					ImportConflictLabels.Kind(conflict.Kind),
 					item.IncomingPath,
 					incomingGuid,
 					item.TargetPath,
@@ -210,79 +246,47 @@ namespace YanK
 			}
 
 			if (!plan.CanApply)
-			{
-				string message = string.Format(
-					L("yspImportPreflightFailed", "Import preflight failed:\n\n{0}"),
-					string.Join("\n", plan.Errors.ToArray()));
-				EditorUtility.DisplayDialog(
-					L("yspImportDialogTitle", "Smart Package Import"),
-					message,
-					L("yspOK", "OK"));
-				result.Status = ImportRunStatus.PreflightFailed;
-				result.Failed = plan.Errors.Count;
-				return result;
-			}
+				return Blocked(result, projectRoot, plan);
 
-			string projectRoot = Directory.GetParent(Application.dataPath).FullName;
+			string runName = "import-" + Guid.NewGuid().ToString("N").Substring(0, 8);
+			string runDirectory = Path.Combine(StagingRoot(projectRoot), runName);
+			// Originals stay recoverable across a restart if a rollback ever fails.
+			string backupDirectory = Path.Combine(projectRoot, "Library", "YanKSmartPackage", runName);
 			var writtenItems = new List<ImportPlanItem>();
-			bool abortRemainingWrites = false;
+			var failedTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			var staged = new Dictionary<LoadedPackage, Dictionary<string, StagedAssetPayload>>();
+			var packageErrors = new Dictionary<LoadedPackage, string>();
+			Stopwatch clock = Stopwatch.StartNew();
+			long nextProgress = 0;
 			try
 			{
-				int index = 0;
-				while (index < plan.OrderedItems.Count && !abortRemainingWrites)
+				for (int i = 0; i < plan.OrderedItems.Count; i++)
 				{
-					LoadedPackage package = plan.OrderedItems[index].Package;
-					int end = index + 1;
-					while (end < plan.OrderedItems.Count && plan.OrderedItems[end].Package == package)
-						end++;
-
-					if (!PackageFileIsUnchanged(package))
+					ImportPlanItem item = plan.OrderedItems[i];
+					if (item.Action == ImportPlanAction.SkipByPolicy)
 					{
-						result.Failed++;
-						result.NotAttempted += CountWrites(plan.OrderedItems, index, plan.OrderedItems.Count);
-						Debug.LogError("[YSP] Package changed after it was scanned: " + package.FilePath);
-						abortRemainingWrites = true;
-						break;
+						result.PolicySkipped++;
+						continue;
 					}
-
-					var wantedGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-					for (int i = index; i < end; i++)
+					if (item.Action == ImportPlanAction.SkipIdentical)
 					{
-						ImportPlanAction action = plan.OrderedItems[i].Action;
-						if (action == ImportPlanAction.WriteNew || action == ImportPlanAction.Overwrite)
-							wantedGuids.Add(plan.OrderedItems[i].Entry.Guid);
-					}
-
-					Dictionary<string, LoadedAssetBytes> payloads;
-					try
-					{
-						payloads = UnityPackageReader.ReadBytesFor(package.FilePath, wantedGuids);
-					}
-					catch (Exception ex)
-					{
-						result.Failed++;
-						result.NotAttempted += CountWrites(plan.OrderedItems, index, plan.OrderedItems.Count);
-						Debug.LogError("[YSP] Failed to read package payload: " + ex);
-						abortRemainingWrites = true;
-						break;
-					}
-
-					for (int i = index; i < end; i++)
-					{
-						ImportPlanItem item = plan.OrderedItems[i];
-						if (item.Action == ImportPlanAction.SkipByPolicy)
+						// It matched a copy an earlier package was meant to write.
+						if (failedTargets.Contains(item.TargetPath))
 						{
-							result.PolicySkipped++;
+							AddFailure(result, projectRoot, item.TargetPath, "Its matching copy from an earlier package was not imported.");
 							continue;
 						}
-						if (item.Action == ImportPlanAction.SkipIdentical)
-						{
-							result.IdenticalSkipped++;
-							continue;
-						}
-						if (item.Action != ImportPlanAction.WriteNew && item.Action != ImportPlanAction.Overwrite)
-							continue;
+						result.IdenticalSkipped++;
+						result.ImportedPaths.Add(item.TargetPath);
+						continue;
+					}
+					if (item.Action != ImportPlanAction.WriteNew && item.Action != ImportPlanAction.Overwrite)
+						continue;
 
+					// A progress bar per file can take longer than writing a small file.
+					if (clock.ElapsedMilliseconds >= nextProgress)
+					{
+						nextProgress = clock.ElapsedMilliseconds + 100;
 						EditorUtility.DisplayProgressBar(
 							L("yspImportProgressTitle", "Importing…"),
 							string.Format(
@@ -291,74 +295,169 @@ namespace YanK
 								plan.OrderedItems.Count,
 								item.TargetPath),
 							(float)(i + 1) / plan.OrderedItems.Count);
-
-						try
-						{
-							if (!payloads.TryGetValue(item.Entry.Guid, out LoadedAssetBytes payload))
-								throw new InvalidDataException("Selected payload is missing for " + item.IncomingPath);
-							ValidatePayload(item.Entry, payload);
-							if (!ProjectPackagePath.TryGetAbsolutePath(projectRoot, item.TargetPath,
-								out string absolutePath, out string pathError))
-								throw new InvalidDataException(pathError);
-
-							if (IsIdentical(item.Entry, payload, absolutePath))
-							{
-								result.IdenticalSkipped++;
-								continue;
-							}
-
-							WriteEntry(item.Entry, payload, absolutePath);
-							writtenItems.Add(item);
-							if (item.Action == ImportPlanAction.WriteNew)
-								result.Written++;
-							else
-								result.Updated++;
-						}
-						catch (Exception ex)
-						{
-							result.Failed++;
-							result.NotAttempted += CountWrites(plan.OrderedItems, i + 1, plan.OrderedItems.Count);
-							Debug.LogError("[YSP] Import failed for " + item.IncomingPath + ": " + ex);
-							abortRemainingWrites = true;
-							break;
-						}
 					}
 
-					index = end;
+					// One failed file does not stop the others; each failure is listed with why.
+					try
+					{
+						Dictionary<string, StagedAssetPayload> payloads = PayloadsFor(item.Package, plan, runDirectory, staged, packageErrors);
+						if (!payloads.TryGetValue(item.Entry.Guid, out StagedAssetPayload payload))
+						{
+							// Its staged copy was gone and the package could not be read again.
+							if (packageErrors.TryGetValue(item.Package, out string packageError))
+								throw new IOException(packageError);
+							// A pathname-only folder (an exported package root) has no members.
+							if (item.Entry.HasAssetMember || item.Entry.HasMetaMember)
+								throw new InvalidDataException("Selected payload is missing for " + item.IncomingPath);
+							payload = new StagedAssetPayload();
+						}
+						ValidatePayload(item.Entry, payload);
+						if (!ProjectPackagePath.TryGetAbsolutePath(projectRoot, item.TargetPath,
+							out string absolutePath, out string pathError))
+							throw new InvalidDataException(pathError);
+
+						if (IsIdentical(item.Entry, absolutePath))
+						{
+							result.IdenticalSkipped++;
+							result.ImportedPaths.Add(item.TargetPath);
+							continue;
+						}
+
+						WriteEntry(item.Entry, payload, absolutePath, backupDirectory);
+						writtenItems.Add(item);
+						result.ImportedPaths.Add(item.TargetPath);
+						if (item.Action == ImportPlanAction.WriteNew)
+							result.Written++;
+						else
+							result.Updated++;
+					}
+					catch (Exception ex)
+					{
+						failedTargets.Add(item.TargetPath);
+						AddFailure(result, projectRoot, item.TargetPath, ex.Message);
+						Debug.LogError("[YSP] Import failed for " + item.IncomingPath + ": " + ex);
+					}
 				}
 			}
 			finally
 			{
 				EditorUtility.ClearProgressBar();
+				DeleteStaging(projectRoot, runDirectory);
+				// A failed rollback leaves its originals here, named in that file's reason.
+				DeleteIfEmpty(backupDirectory);
+				DeleteIfEmpty(Path.GetDirectoryName(backupDirectory));
 			}
 
 			if (writtenItems.Count > 0)
 			{
 				AssetDatabase.Refresh(ImportAssetOptions.Default);
-				VerifyWrittenGuids(writtenItems, result);
+				VerifyWrittenGuids(writtenItems, result, projectRoot);
 			}
 
 			result.Status = result.Failed > 0 ? ImportRunStatus.PartiallyFailed : ImportRunStatus.Succeeded;
-			string summary = string.Format(
-				L("yspImportSummary", "New: {0}\nOverwritten: {1}\nSkipped: {2}\nFailed: {3}"),
-				result.Written, result.Updated, result.Skipped, result.Failed);
-			EditorUtility.DisplayDialog(
-				L("yspImportDialogTitle", "Smart Package Import"),
-				summary,
-				L("yspOK", "OK"));
 			return result;
 		}
 
-		private static int CountWrites(List<ImportPlanItem> items, int start, int end)
+		private static ImportRunResult Blocked(ImportRunResult result, string projectRoot, ImportPlan plan)
 		{
-			int count = 0;
-			for (int i = start; i < end; i++)
+			foreach (ImportPlanItem item in plan.OrderedItems)
+				if (item.Action == ImportPlanAction.Blocked)
+					AddFailure(result, projectRoot, item.IncomingPath, item.Conflict.Message);
+			result.Status = ImportRunStatus.PreflightFailed;
+			return result;
+		}
+
+		private static void AddFailure(ImportRunResult result, string projectRoot, string path, string reason)
+		{
+			result.Failed++;
+			result.Failures.Add(new ImportFailure { Path = path, Reason = ProjectRelative(projectRoot, reason) });
+		}
+
+		// Reasons name project files the way the list does, relative to the project.
+		private static string ProjectRelative(string projectRoot, string reason)
+		{
+			if (string.IsNullOrEmpty(reason) || string.IsNullOrEmpty(projectRoot))
+				return reason;
+			string root = Path.GetFullPath(projectRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+			return reason.Replace(root + Path.DirectorySeparatorChar, string.Empty)
+				.Replace(root.Replace('\\', '/') + "/", string.Empty);
+		}
+
+		private static Dictionary<string, StagedAssetPayload> PayloadsFor(
+			LoadedPackage package,
+			ImportPlan plan,
+			string runDirectory,
+			Dictionary<LoadedPackage, Dictionary<string, StagedAssetPayload>> staged,
+			Dictionary<LoadedPackage, string> packageErrors)
+		{
+			if (staged.TryGetValue(package, out Dictionary<string, StagedAssetPayload> payloads))
+				return payloads;
+			var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (ImportPlanItem item in plan.OrderedItems)
+				if (item.Package == package
+					&& (item.Action == ImportPlanAction.WriteNew || item.Action == ImportPlanAction.Overwrite))
+					wanted.Add(item.Entry.Guid);
+
+			// Loading already wrote every payload; read the package again only for what is gone.
+			var missing = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			payloads = PreparedPayloads(package, wanted, missing);
+			if (missing.Count > 0)
 			{
-				ImportPlanAction action = items[i].Action;
-				if (action == ImportPlanAction.WriteNew || action == ImportPlanAction.Overwrite)
-					count++;
+				try
+				{
+					if (!PackageFileIsUnchanged(package))
+						throw new IOException("Package changed after it was scanned: " + package.FilePath);
+					Dictionary<string, StagedAssetPayload> restaged = UnityPackageReader.StageSelected(package.FilePath, missing,
+						Path.Combine(runDirectory, "package-" + package.DropOrder));
+					if (!PackageFileIsUnchanged(package))
+						throw new IOException("Package changed while it was read: " + package.FilePath);
+					foreach (KeyValuePair<string, StagedAssetPayload> pair in restaged)
+						payloads[pair.Key] = pair.Value;
+				}
+				catch (Exception ex) when (ex is IOException || ex is InvalidDataException || ex is UnauthorizedAccessException)
+				{
+					// Only the files that were not staged fail; the rest still import.
+					packageErrors[package] = ex.Message;
+				}
 			}
-			return count;
+			staged.Add(package, payloads);
+			return payloads;
+		}
+
+		private static Dictionary<string, StagedAssetPayload> PreparedPayloads(LoadedPackage package, HashSet<string> wanted, HashSet<string> missing)
+		{
+			var result = new Dictionary<string, StagedAssetPayload>(StringComparer.OrdinalIgnoreCase);
+			if (package.Entries == null)
+				return result;
+			foreach (UnityPackageEntry entry in package.Entries)
+			{
+				if (entry == null || !wanted.Contains(entry.Guid))
+					continue;
+				if (string.IsNullOrEmpty(package.PayloadDirectory))
+				{
+					missing.Add(entry.Guid);
+					continue;
+				}
+				var payload = new StagedAssetPayload();
+				bool complete = true;
+				if (entry.HasAssetMember)
+				{
+					var asset = new FileInfo(Path.Combine(package.PayloadDirectory, entry.Guid + ".asset.payload"));
+					complete = asset.Exists && asset.Length == entry.Size;
+					payload.AssetPath = asset.FullName;
+					payload.AssetSize = complete ? asset.Length : 0;
+				}
+				if (complete && entry.HasMetaMember)
+				{
+					payload.MetaPath = Path.Combine(package.PayloadDirectory, entry.Guid + ".meta.payload");
+					complete = File.Exists(payload.MetaPath);
+				}
+				if (complete)
+					result[entry.Guid] = payload;
+				else
+					missing.Add(entry.Guid);
+			}
+			return result;
 		}
 
 		private static bool PackageFileIsUnchanged(LoadedPackage package)
@@ -369,73 +468,52 @@ namespace YanK
 			return info.Length == package.FileLength && info.LastWriteTimeUtc.Ticks == package.FileLastWriteUtcTicks;
 		}
 
-		private static void ValidatePayload(UnityPackageEntry entry, LoadedAssetBytes payload)
+		// Staged files sat on disk while the user reviewed, so hash them once more before use.
+		private static void ValidatePayload(UnityPackageEntry entry, StagedAssetPayload payload)
 		{
-			if (entry.HasAssetMember && payload.AssetBytes == null)
+			if (entry.HasAssetMember && string.IsNullOrEmpty(payload.AssetPath))
 				throw new InvalidDataException("Package asset member is missing: " + entry.AssetPath);
-			if (entry.HasMetaMember && payload.MetaBytes == null)
+			if (entry.HasMetaMember && string.IsNullOrEmpty(payload.MetaPath))
 				throw new InvalidDataException("Package asset.meta member is missing: " + entry.AssetPath);
 			if (entry.HasMetaMember)
 			{
-				string payloadGuid = GuidUtility.ExtractGuidFromMeta(payload.MetaBytes);
-				if (!string.Equals(payloadGuid, entry.MetaGuid, StringComparison.OrdinalIgnoreCase))
+				byte[] meta = File.ReadAllBytes(payload.MetaPath);
+				if (!string.Equals(GuidUtility.ExtractGuidFromMeta(meta), entry.MetaGuid, StringComparison.OrdinalIgnoreCase))
 					throw new InvalidDataException("Package meta GUID changed after preflight: " + entry.AssetPath);
+				if (!string.Equals(GuidUtility.ComputeSha256(meta), entry.MetaHash, StringComparison.Ordinal))
+					throw new InvalidDataException("Package meta content changed after preflight: " + entry.AssetPath);
 			}
 			if (entry.HasAssetMember
-				&& !string.Equals(GuidUtility.ComputeSha256(payload.AssetBytes), entry.AssetHash, StringComparison.Ordinal))
+				&& !string.Equals(HashFile(payload.AssetPath), entry.AssetHash, StringComparison.Ordinal))
 				throw new InvalidDataException("Package asset content changed after preflight: " + entry.AssetPath);
-			if (entry.HasMetaMember
-				&& !string.Equals(GuidUtility.ComputeSha256(payload.MetaBytes), entry.MetaHash, StringComparison.Ordinal))
-				throw new InvalidDataException("Package meta content changed after preflight: " + entry.AssetPath);
 		}
 
-		private static bool IsIdentical(UnityPackageEntry entry, LoadedAssetBytes payload, string absolutePath)
+		private static bool IsIdentical(UnityPackageEntry entry, string absolutePath)
 		{
+			string metaPath = absolutePath + ".meta";
 			if (entry.IsFolder)
 			{
 				if (!Directory.Exists(absolutePath))
 					return false;
-				if (entry.HasMetaMember)
-					return BytesEqualFile(payload.MetaBytes, absolutePath + ".meta");
-				return !File.Exists(absolutePath + ".meta");
 			}
-			if (!File.Exists(absolutePath) || !BytesEqualFile(payload.AssetBytes, absolutePath))
-				return false;
+			else
+			{
+				if (!File.Exists(absolutePath) || new FileInfo(absolutePath).Length != entry.Size
+					|| !HashEquals(absolutePath, entry.AssetHash))
+					return false;
+			}
 			if (entry.HasMetaMember)
-				return BytesEqualFile(payload.MetaBytes, absolutePath + ".meta");
-			return !File.Exists(absolutePath + ".meta");
+				return HashEquals(metaPath, entry.MetaHash);
+			return !File.Exists(metaPath);
 		}
 
-		private static bool BytesEqualFile(byte[] expected, string filePath)
+		private static bool HashEquals(string path, string expected)
 		{
-			if (expected == null || !File.Exists(filePath))
+			if (string.IsNullOrEmpty(expected) || !File.Exists(path))
 				return false;
 			try
 			{
-				var before = new FileInfo(filePath);
-				long originalLength = before.Length;
-				long originalWriteTicks = before.LastWriteTimeUtc.Ticks;
-				if (originalLength != expected.LongLength)
-					return false;
-				using (var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read))
-				{
-					byte[] buffer = new byte[64 * 1024];
-					int offset = 0;
-					while (offset < expected.Length)
-					{
-						int count = Math.Min(buffer.Length, expected.Length - offset);
-						int read = stream.Read(buffer, 0, count);
-						if (read != count)
-							return false;
-						for (int i = 0; i < read; i++)
-							if (buffer[i] != expected[offset + i])
-								return false;
-						offset += read;
-					}
-				}
-				var after = new FileInfo(filePath);
-				return after.Length == originalLength
-					&& after.LastWriteTimeUtc.Ticks == originalWriteTicks;
+				return string.Equals(HashFile(path), expected, StringComparison.Ordinal);
 			}
 			catch (IOException)
 			{
@@ -447,19 +525,28 @@ namespace YanK
 			}
 		}
 
+		private static string HashFile(string path)
+		{
+			using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan))
+				return GuidUtility.ComputeSha256(stream);
+		}
+
 		private sealed class FileCommitPart
 		{
 			public string TargetPath;
-			public byte[] Bytes;
-			public string StagedPath;
+			// A staged payload moved into place; null removes an existing file there.
+			public string SourcePath;
 			public string BackupPath;
 			public bool HadOriginal;
 			public bool OriginalMoved;
 			public bool NewInstalled;
 		}
 
-		private static void WriteEntry(UnityPackageEntry entry, LoadedAssetBytes payload, string absolutePath)
+		private static void WriteEntry(UnityPackageEntry entry, StagedAssetPayload payload, string absolutePath, string backupDirectory)
 		{
+			// A null source intentionally removes a stale sidecar for path-managed
+			// ProjectSettings / Packages entries.
+			string metaSource = entry.HasMetaMember ? payload.MetaPath : null;
 			if (entry.IsFolder)
 			{
 				if (File.Exists(absolutePath))
@@ -468,10 +555,10 @@ namespace YanK
 				Directory.CreateDirectory(absolutePath);
 				try
 				{
-					CommitFileParts(new FileCommitPart
+					CommitFileParts(backupDirectory, new FileCommitPart
 					{
 						TargetPath = absolutePath + ".meta",
-						Bytes = payload.MetaBytes
+						SourcePath = metaSource
 					});
 				}
 				catch
@@ -496,20 +583,17 @@ namespace YanK
 			if (!string.IsNullOrEmpty(parent))
 				Directory.CreateDirectory(parent);
 
-			CommitFileParts(
-				new FileCommitPart { TargetPath = absolutePath, Bytes = payload.AssetBytes },
-				new FileCommitPart
-				{
-					TargetPath = absolutePath + ".meta",
-					// A null payload intentionally removes a stale sidecar for path-managed
-					// ProjectSettings / Packages files.
-					Bytes = entry.HasMetaMember ? payload.MetaBytes : null
-				});
+			CommitFileParts(backupDirectory,
+				new FileCommitPart { TargetPath = absolutePath, SourcePath = payload.AssetPath },
+				new FileCommitPart { TargetPath = absolutePath + ".meta", SourcePath = metaSource });
 		}
 
-		private static void CommitFileParts(params FileCommitPart[] parts)
+		// Originals move aside into a short folder on the same drive, not beside the target:
+		// a long name beside a long path would pass Windows' 260-character limit where Unity
+		// itself still imports the target.
+		private static void CommitFileParts(string backupDirectory, params FileCommitPart[] parts)
 		{
-			string token = Guid.NewGuid().ToString("N");
+			string token = Guid.NewGuid().ToString("N").Substring(0, 12);
 			bool committed = false;
 			try
 			{
@@ -522,22 +606,20 @@ namespace YanK
 					if (string.IsNullOrEmpty(directory))
 						throw new IOException("The import target has no parent directory: " + part.TargetPath);
 					Directory.CreateDirectory(directory);
-					part.StagedPath = Path.Combine(directory, ".ysp-import-" + token + "-" + i + ".tmp");
-					part.BackupPath = Path.Combine(directory, ".ysp-import-" + token + "-" + i + ".bak");
+					if (part.SourcePath != null && !File.Exists(part.SourcePath))
+						throw new IOException("The staged payload is missing for " + part.TargetPath);
 					part.HadOriginal = File.Exists(part.TargetPath);
-					if (part.Bytes != null)
-					{
-						using (var stream = new FileStream(part.StagedPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-							stream.Write(part.Bytes, 0, part.Bytes.Length);
-					}
+					if (part.HadOriginal)
+						part.BackupPath = Path.Combine(backupDirectory, token + "-" + i + ".bak");
 				}
 
-				// Move every original aside only after every replacement has been staged.
+				// Move every original aside only after every replacement is known to exist.
 				for (int i = 0; i < parts.Length; i++)
 				{
 					FileCommitPart part = parts[i];
 					if (!part.HadOriginal)
 						continue;
+					Directory.CreateDirectory(backupDirectory);
 					File.Move(part.TargetPath, part.BackupPath);
 					part.OriginalMoved = true;
 				}
@@ -545,9 +627,9 @@ namespace YanK
 				for (int i = 0; i < parts.Length; i++)
 				{
 					FileCommitPart part = parts[i];
-					if (part.Bytes == null)
+					if (part.SourcePath == null)
 						continue;
-					File.Move(part.StagedPath, part.TargetPath);
+					File.Move(part.SourcePath, part.TargetPath);
 					part.NewInstalled = true;
 				}
 
@@ -562,7 +644,7 @@ namespace YanK
 					try
 					{
 						if (part.NewInstalled && File.Exists(part.TargetPath))
-							File.Delete(part.TargetPath);
+							ReturnToStaging(part);
 						if (part.OriginalMoved && File.Exists(part.BackupPath))
 							File.Move(part.BackupPath, part.TargetPath);
 					}
@@ -578,17 +660,26 @@ namespace YanK
 						"Import commit failed and rollback was incomplete. Recovery files were preserved:\n"
 						+ string.Join("\n", rollbackErrors.ToArray()),
 						commitError);
-				throw new IOException("Import commit failed; the original file and meta were restored.", commitError);
+				throw new IOException(commitError.Message + " The original file and meta were restored.", commitError);
 			}
 			finally
 			{
-				for (int i = 0; i < parts.Length; i++)
-				{
-					FileCommitPart part = parts[i];
-					TryDeleteOwnedTemporary(part.StagedPath);
-					if (committed)
-						TryDeleteOwnedTemporary(part.BackupPath);
-				}
+				if (committed)
+					for (int i = 0; i < parts.Length; i++)
+						TryDeleteOwnedTemporary(parts[i].BackupPath);
+			}
+		}
+
+		// The payload moved in goes back to staging, so a retry can still use it.
+		private static void ReturnToStaging(FileCommitPart part)
+		{
+			try
+			{
+				File.Move(part.TargetPath, part.SourcePath);
+			}
+			catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+			{
+				File.Delete(part.TargetPath);
 			}
 		}
 
@@ -603,7 +694,44 @@ namespace YanK
 			}
 		}
 
-		private static void VerifyWrittenGuids(List<ImportPlanItem> writtenItems, ImportRunResult result)
+		private static void DeleteIfEmpty(string directory)
+		{
+			try
+			{
+				if (Directory.Exists(directory) && Directory.GetFileSystemEntries(directory).Length == 0)
+					Directory.Delete(directory, false);
+			}
+			catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException) { }
+		}
+
+		private static void DeleteOwnedTree(string path)
+		{
+			try
+			{
+				if (!Directory.Exists(path))
+					return;
+				if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+					return;
+				foreach (string child in Directory.GetFileSystemEntries(path))
+				{
+					FileAttributes attributes = File.GetAttributes(child);
+					if ((attributes & FileAttributes.ReparsePoint) != 0)
+						continue;
+					if ((attributes & FileAttributes.Directory) != 0)
+						DeleteOwnedTree(child);
+					else
+						File.Delete(child);
+				}
+				if (Directory.GetFileSystemEntries(path).Length == 0)
+					Directory.Delete(path, false);
+			}
+			catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
+			{
+				Debug.LogWarning("[YSP] Could not remove temporary import files: " + path + "\n" + ex.Message);
+			}
+		}
+
+		private static void VerifyWrittenGuids(List<ImportPlanItem> writtenItems, ImportRunResult result, string projectRoot)
 		{
 			// Multiple selected packages may intentionally replace the same target. Verify
 			// only the last successful write at each path; historical GUIDs are not expected
@@ -628,7 +756,15 @@ namespace YanK
 				string actual = AssetDatabase.AssetPathToGUID(item.TargetPath);
 				if (!string.Equals(expected, actual, StringComparison.OrdinalIgnoreCase))
 				{
-					result.Failed++;
+					// It is listed as failed instead of imported, so the counts agree with the list.
+					if (item.Action == ImportPlanAction.WriteNew)
+						result.Written--;
+					else
+						result.Updated--;
+					result.ImportedPaths.Remove(item.TargetPath);
+					string message = "GUID verification failed. Expected " + expected + ", got "
+						+ (string.IsNullOrEmpty(actual) ? "(none)" : actual);
+					AddFailure(result, projectRoot, item.TargetPath, message);
 					Debug.LogError("[YSP] GUID verification failed for " + item.TargetPath
 						+ ". Expected " + expected + ", got " + (string.IsNullOrEmpty(actual) ? "(none)" : actual));
 				}

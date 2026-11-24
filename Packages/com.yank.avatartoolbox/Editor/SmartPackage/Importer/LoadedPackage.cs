@@ -9,6 +9,9 @@ namespace YanK
 		public int LoadGeneration;
 		public long FileLength;
 		public long FileLastWriteUtcTicks;
+		// Every asset and meta member, written under the project's Temp folder while the
+		// package loaded. Null when there was no room; Import then reads the package again.
+		public string PayloadDirectory;
 		public List<UnityPackageEntry> Entries = new List<UnityPackageEntry>();
 		public PackageAssetNode Tree;
 		public bool IsExpanded = true;
@@ -26,6 +29,7 @@ namespace YanK
 		public int PathConflictCount;
 		public int UpdateCount;
 		public int DuplicateCount;
+		public int BlockedCount;
 		public int SelectedCount;
 		public int TallyVersion = -1;
 

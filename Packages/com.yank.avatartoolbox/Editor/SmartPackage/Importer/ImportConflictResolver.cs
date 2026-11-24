@@ -8,7 +8,24 @@ namespace YanK
 		Duplicate,
 		Update,
 		PathConflict,
-		GuidConflict
+		GuidConflict,
+		Blocked
+	}
+
+	public static class ImportConflictLabels
+	{
+		public static string Kind(ImportConflictKind kind)
+		{
+			switch (kind)
+			{
+				case ImportConflictKind.New: return YanKLocalization.L("yspConflictNew", "New");
+				case ImportConflictKind.Duplicate: return YanKLocalization.L("yspConflictIdentical", "Identical");
+				case ImportConflictKind.Update: return YanKLocalization.L("yspConflictUpdate", "Update");
+				case ImportConflictKind.PathConflict: return YanKLocalization.L("yspConflictPath", "Path Taken");
+				case ImportConflictKind.Blocked: return YanKLocalization.L("yspConflictBlocked", "Blocked");
+				default: return YanKLocalization.L("yspConflictGuid", "GUID Conflict");
+			}
+		}
 	}
 
 	public struct ImportConflict

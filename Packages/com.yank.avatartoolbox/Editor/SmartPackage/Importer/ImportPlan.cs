@@ -51,6 +51,9 @@ namespace YanK
 			public string Path;
 			public bool IsFolder;
 			public bool FromProject;
+			// An earlier selected package matched this project asset exactly, so a later
+			// package that differs is a choice between packages, not a plain update.
+			public bool Claimed;
 			public bool ContentKnown;
 			public bool HasAsset;
 			public bool HasMeta;
@@ -79,20 +82,22 @@ namespace YanK
 
 			var byGuid = new Dictionary<string, VirtualAsset>(StringComparer.OrdinalIgnoreCase);
 			var byPath = new Dictionary<string, VirtualAsset>(StringComparer.OrdinalIgnoreCase);
+			var descendantPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 			var removedProjectGuids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
 			foreach (LoadedPackage package in orderedPackages)
 			{
 				HashSet<string> selectedLeaves = GetSelectedLeafPaths(package.Tree);
+				HashSet<string> selectedFolders = GetSelectedFolderPaths(selectedLeaves);
 				var entries = new List<UnityPackageEntry>(package.Entries ?? new List<UnityPackageEntry>());
 				entries.Sort((a, b) => a.EntryOrder.CompareTo(b.EntryOrder));
 
 				foreach (UnityPackageEntry entry in entries)
 				{
-					if (entry == null || !IsSelected(entry, selectedLeaves))
+					if (entry == null || !IsSelected(entry, selectedLeaves, selectedFolders))
 						continue;
 					ResolveEntry(plan, package, entry, project, policy, askOverwrite,
-						byGuid, byPath, removedProjectGuids);
+						byGuid, byPath, descendantPaths, removedProjectGuids);
 				}
 			}
 
@@ -108,6 +113,7 @@ namespace YanK
 			Func<ImportPlanItem, bool> askOverwrite,
 			Dictionary<string, VirtualAsset> byGuid,
 			Dictionary<string, VirtualAsset> byPath,
+			Dictionary<string, string> descendantPaths,
 			HashSet<string> removedProjectGuids)
 		{
 			var item = new ImportPlanItem
@@ -128,7 +134,7 @@ namespace YanK
 			item.TargetPath = incomingPath;
 
 			string identityGuid = entry.IdentityGuid;
-			VirtualAsset guidHolder = FindByGuid(identityGuid, project, byGuid, byPath, removedProjectGuids);
+			VirtualAsset guidHolder = FindByGuid(identityGuid, project, byGuid, byPath, descendantPaths, removedProjectGuids);
 			if (guidHolder != null)
 			{
 				item.TargetPath = guidHolder.Path;
@@ -148,7 +154,7 @@ namespace YanK
 					Block(plan, item, "The GUID target changes between a file and a folder: " + normalizedTarget);
 					return;
 				}
-				if (!TryValidateTargetShape(normalizedTarget, entry.IsFolder, project, byPath, out string shapeError))
+				if (!TryValidateTargetShape(normalizedTarget, entry.IsFolder, project, byPath, descendantPaths, out string shapeError))
 				{
 					Block(plan, item, shapeError);
 					return;
@@ -156,6 +162,7 @@ namespace YanK
 				if (ContentMatches(guidHolder, entry))
 				{
 					item.Action = ImportPlanAction.SkipIdentical;
+					guidHolder.Claimed = true;
 					item.Conflict = new ImportConflict
 					{
 						Kind = ImportConflictKind.Duplicate,
@@ -178,7 +185,11 @@ namespace YanK
 					IncomingPath = incomingPath,
 					TargetPath = normalizedTarget,
 					ExistingGuid = identityGuid,
+					// Like Unity's importer, a plain update of a project asset (same GUID and path,
+					// new content) never asks. Selected packages that share a GUID still ask between
+					// themselves, and so does a project file whose content could not be read.
 					RequiresDecision = policy == ConflictPolicy.Ask
+						&& !(kind == ImportConflictKind.Update && IsPlainProjectUpdate(guidHolder))
 				};
 
 				if (!ShouldOverwrite(item, policy, askOverwrite))
@@ -194,13 +205,14 @@ namespace YanK
 				SetContent(guidHolder, entry);
 				byGuid[identityGuid] = guidHolder;
 				byPath[normalizedTarget] = guidHolder;
+				AddDescendantPaths(normalizedTarget, descendantPaths);
 				return;
 			}
 
-			VirtualAsset pathHolder = FindByPath(incomingPath, project, byGuid, byPath, removedProjectGuids);
+			VirtualAsset pathHolder = FindByPath(incomingPath, project, byGuid, byPath, descendantPaths, removedProjectGuids);
 			if (pathHolder == null)
 			{
-				if (!TryValidateTargetShape(incomingPath, entry.IsFolder, project, byPath, out string shapeError))
+				if (!TryValidateTargetShape(incomingPath, entry.IsFolder, project, byPath, descendantPaths, out string shapeError))
 				{
 					Block(plan, item, shapeError);
 					return;
@@ -212,7 +224,7 @@ namespace YanK
 					IncomingPath = incomingPath,
 					TargetPath = incomingPath
 				};
-				Reserve(identityGuid, incomingPath, entry, byGuid, byPath);
+				Reserve(identityGuid, incomingPath, entry, byGuid, byPath, descendantPaths);
 				return;
 			}
 
@@ -221,7 +233,7 @@ namespace YanK
 				Block(plan, item, "Import would replace a file with a folder or a folder with a file: " + incomingPath);
 				return;
 			}
-			if (!TryValidateTargetShape(incomingPath, entry.IsFolder, project, byPath, out string occupiedShapeError))
+			if (!TryValidateTargetShape(incomingPath, entry.IsFolder, project, byPath, descendantPaths, out string occupiedShapeError))
 			{
 				Block(plan, item, occupiedShapeError);
 				return;
@@ -229,6 +241,7 @@ namespace YanK
 			if (ContentMatches(pathHolder, entry))
 			{
 				item.Action = ImportPlanAction.SkipIdentical;
+				pathHolder.Claimed = true;
 				item.Conflict = new ImportConflict
 				{
 					Kind = ImportConflictKind.Duplicate,
@@ -253,7 +266,10 @@ namespace YanK
 				IncomingPath = incomingPath,
 				TargetPath = incomingPath,
 				ExistingGuid = pathHolder.Guid,
+				// Path-managed project files (ProjectSettings, package roots) and other selected
+				// packages still ask.
 				RequiresDecision = policy == ConflictPolicy.Ask
+					&& !(pathKind == ImportConflictKind.Update && sameIdentity && IsPlainProjectUpdate(pathHolder))
 			};
 
 			if (!ShouldOverwrite(item, policy, askOverwrite))
@@ -268,7 +284,12 @@ namespace YanK
 				byGuid.Remove(pathHolder.Guid);
 				removedProjectGuids.Add(pathHolder.Guid);
 			}
-			Reserve(identityGuid, incomingPath, entry, byGuid, byPath);
+			Reserve(identityGuid, incomingPath, entry, byGuid, byPath, descendantPaths);
+		}
+
+		private static bool IsPlainProjectUpdate(VirtualAsset holder)
+		{
+			return holder.FromProject && holder.ContentKnown && !holder.Claimed;
 		}
 
 		private static bool ShouldOverwrite(ImportPlanItem item, ConflictPolicy policy, Func<ImportPlanItem, bool> askOverwrite)
@@ -277,6 +298,8 @@ namespace YanK
 				return true;
 			if (policy == ConflictPolicy.Skip)
 				return false;
+			if (!item.Conflict.RequiresDecision)
+				return true;
 			// Preview builds do not show modal dialogs and assume overwrite so later
 			// package conflicts can still be displayed. Apply supplies the decision callback.
 			return askOverwrite == null || askOverwrite(item);
@@ -287,6 +310,7 @@ namespace YanK
 			bool targetIsFolder,
 			IAssetProbe project,
 			Dictionary<string, VirtualAsset> byPath,
+			Dictionary<string, string> descendantPaths,
 			out string error)
 		{
 			error = null;
@@ -310,17 +334,10 @@ namespace YanK
 				}
 			}
 
-			if (!targetIsFolder)
+			if (!targetIsFolder && descendantPaths.TryGetValue(path, out string descendant))
 			{
-				string descendantPrefix = path + "/";
-				foreach (KeyValuePair<string, VirtualAsset> pair in byPath)
-				{
-					if (pair.Key.StartsWith(descendantPrefix, StringComparison.OrdinalIgnoreCase))
-					{
-						error = "The import target is already used as a directory by " + pair.Key;
-						return false;
-					}
-				}
+				error = "The import target is already used as a directory by " + descendant;
+				return false;
 			}
 
 			return true;
@@ -331,7 +348,7 @@ namespace YanK
 			item.Action = ImportPlanAction.Blocked;
 			item.Conflict = new ImportConflict
 			{
-				Kind = ImportConflictKind.PathConflict,
+				Kind = ImportConflictKind.Blocked,
 				IncomingPath = item.IncomingPath,
 				TargetPath = item.TargetPath,
 				Message = message
@@ -344,6 +361,7 @@ namespace YanK
 			IAssetProbe project,
 			Dictionary<string, VirtualAsset> byGuid,
 			Dictionary<string, VirtualAsset> byPath,
+			Dictionary<string, string> descendantPaths,
 			HashSet<string> removedProjectGuids)
 		{
 			if (string.IsNullOrEmpty(guid))
@@ -363,7 +381,10 @@ namespace YanK
 			SetProjectContent(asset, project, path);
 			byGuid[guid] = asset;
 			if (!byPath.ContainsKey(path))
+			{
 				byPath[path] = asset;
+				AddDescendantPaths(path, descendantPaths);
+			}
 			return asset;
 		}
 
@@ -372,6 +393,7 @@ namespace YanK
 			IAssetProbe project,
 			Dictionary<string, VirtualAsset> byGuid,
 			Dictionary<string, VirtualAsset> byPath,
+			Dictionary<string, string> descendantPaths,
 			HashSet<string> removedProjectGuids)
 		{
 			if (byPath.TryGetValue(path, out VirtualAsset known))
@@ -386,6 +408,7 @@ namespace YanK
 			var asset = new VirtualAsset { Guid = guid, Path = path, IsFolder = project.IsFolderAt(path), FromProject = true };
 			SetProjectContent(asset, project, path);
 			byPath[path] = asset;
+			AddDescendantPaths(path, descendantPaths);
 			if (!string.IsNullOrEmpty(guid))
 				byGuid[guid] = asset;
 			return asset;
@@ -396,13 +419,27 @@ namespace YanK
 			string path,
 			UnityPackageEntry entry,
 			Dictionary<string, VirtualAsset> byGuid,
-			Dictionary<string, VirtualAsset> byPath)
+			Dictionary<string, VirtualAsset> byPath,
+			Dictionary<string, string> descendantPaths)
 		{
 			var asset = new VirtualAsset { Guid = guid, Path = path, IsFolder = entry.IsFolder };
 			SetContent(asset, entry);
 			byPath[path] = asset;
+			AddDescendantPaths(path, descendantPaths);
 			if (!string.IsNullOrEmpty(guid))
 				byGuid[guid] = asset;
+		}
+
+		// byPath only gains keys while planning. Keeping the first actual descendant of each
+		// parent lets the file/directory check look one key up instead of scanning every item.
+		private static void AddDescendantPaths(string path, Dictionary<string, string> descendantPaths)
+		{
+			for (int separator = path.IndexOf('/'); separator >= 0; separator = path.IndexOf('/', separator + 1))
+			{
+				string parent = path.Substring(0, separator);
+				if (!descendantPaths.ContainsKey(parent))
+					descendantPaths[parent] = path;
+			}
 		}
 
 		private static bool ContentMatches(VirtualAsset asset, UnityPackageEntry entry)
@@ -448,18 +485,21 @@ namespace YanK
 			return selected;
 		}
 
-		private static bool IsSelected(UnityPackageEntry entry, HashSet<string> selectedLeaves)
+		// Every folder above a selected leaf, so a folder entry's selection is one lookup.
+		private static HashSet<string> GetSelectedFolderPaths(HashSet<string> selectedLeaves)
+		{
+			var folders = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (string selected in selectedLeaves)
+				for (int separator = selected.IndexOf('/'); separator >= 0; separator = selected.IndexOf('/', separator + 1))
+					folders.Add(selected.Substring(0, separator));
+			return folders;
+		}
+
+		private static bool IsSelected(UnityPackageEntry entry, HashSet<string> selectedLeaves, HashSet<string> selectedFolders)
 		{
 			if (!entry.IsFolder)
 				return selectedLeaves.Contains(entry.AssetPath);
-			string prefix = entry.AssetPath + "/";
-			foreach (string selected in selectedLeaves)
-			{
-				if (string.Equals(selected, entry.AssetPath, StringComparison.OrdinalIgnoreCase)
-					|| selected.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-					return true;
-			}
-			return false;
+			return selectedLeaves.Contains(entry.AssetPath) || selectedFolders.Contains(entry.AssetPath);
 		}
 	}
 }

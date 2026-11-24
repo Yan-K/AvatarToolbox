@@ -169,16 +169,26 @@ namespace YanK
 			}
 		}
 
+		// "Packages/<name>" itself: an embedded package's root. A file directly under Packages
+		// matches too; the planner blocks it from becoming a folder.
+		public static bool IsPackageRoot(string normalizedPath)
+		{
+			return normalizedPath.StartsWith("Packages/", StringComparison.Ordinal)
+				&& normalizedPath.Length > "Packages/".Length
+				&& normalizedPath.IndexOf('/', "Packages/".Length) < 0;
+		}
+
 		public static bool IsPathManaged(string normalizedPath, bool hasValidMetaGuid)
 		{
-			// AssetDatabase GUID identity only applies to Assets and embedded package assets.
-			// Everything else in the Unity project is imported by pathname, even if a custom
-			// packer emitted an asset.meta-shaped placeholder for it.
+			// AssetDatabase GUID identity only applies to Assets and to files inside embedded
+			// packages. Package roots and ProjectSettings have AssetDatabase GUIDs but no .meta,
+			// so they and everything else in the Unity project are imported by pathname, even
+			// if a custom packer emitted an asset.meta-shaped placeholder for them.
 			if (normalizedPath.Equals("Assets", StringComparison.Ordinal)
 				|| normalizedPath.StartsWith("Assets/", StringComparison.Ordinal))
 				return false;
-			if (normalizedPath.Equals("Packages", StringComparison.Ordinal)
-				|| normalizedPath.StartsWith("Packages/", StringComparison.Ordinal))
+			if (normalizedPath.StartsWith("Packages/", StringComparison.Ordinal)
+				&& normalizedPath.IndexOf('/', "Packages/".Length) > 0)
 				return !hasValidMetaGuid;
 			return true;
 		}

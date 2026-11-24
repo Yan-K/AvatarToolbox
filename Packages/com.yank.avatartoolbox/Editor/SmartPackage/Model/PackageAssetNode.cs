@@ -26,6 +26,7 @@ namespace YanK
 		// by the importer when the checked state changes.
 		public bool HasCheckedGuidConflict;
 		public bool HasCheckedPathConflict;
+		public bool HasCheckedBlocked;
 
 		// True when this node (or any checked descendant, for folders) is an Update:
 		// the incoming asset overwrites an existing asset at the same path/GUID.
@@ -79,16 +80,21 @@ namespace YanK
 
 		public void SetChecked(bool value, bool propagateToChildren = true)
 		{
-			IsChecked = value;
-
 			if (propagateToChildren)
-			{
-				foreach (PackageAssetNode c in Children)
-					c.SetChecked(value, true);
-			}
+				SetCheckedDownwards(value);
+			else
+				IsChecked = value;
 
+			// Every descendant now holds the same value, so only the ancestors need updating, once.
 			if (Parent != null)
 				Parent.RecomputeFromChildren();
+		}
+
+		private void SetCheckedDownwards(bool value)
+		{
+			IsChecked = value;
+			foreach (PackageAssetNode c in Children)
+				c.SetCheckedDownwards(value);
 		}
 
 		public void RecomputeFromChildren()

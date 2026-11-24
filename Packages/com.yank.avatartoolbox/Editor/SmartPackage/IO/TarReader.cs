@@ -9,16 +9,27 @@ namespace YanK
 	{
 		readonly Stream stream;
 		readonly byte[] header = new byte[512];
+		// One buffer for hashing, copying and skipping members.
+		readonly byte[] ioBuffer = new byte[64 * 1024];
+		readonly Func<bool> cancelled;
 		long currentEntrySize;
 		bool hasCurrentEntry;
 
-		public TarReader(Stream stream)
+		public TarReader(Stream stream, Func<bool> cancelled = null)
 		{
 			this.stream = stream;
+			this.cancelled = cancelled;
+		}
+
+		void CheckCancelled()
+		{
+			if (cancelled != null && cancelled()) throw new OperationCanceledException();
 		}
 
 		public bool MoveNext(out TarEntry entry)
 		{
+			CheckCancelled();
+			if (hasCurrentEntry) throw new InvalidOperationException("Read or skip the current TAR member first.");
 			entry = null;
 			int read = 0;
 			while (read < 512)
@@ -71,6 +82,7 @@ namespace YanK
 			int read = 0;
 			while (read < buffer.Length)
 			{
+				CheckCancelled();
 				int n = stream.Read(buffer, read, buffer.Length - read);
 				if (n <= 0) throw new EndOfStreamException();
 				read += n;
@@ -83,17 +95,27 @@ namespace YanK
 
 		public string ReadEntrySha256()
 		{
+			return CopyEntryTo(null);
+		}
+
+		// Streams the current member into destination (or nowhere) through one fixed buffer and
+		// returns its SHA-256, so no asset payload is held in memory.
+		public string CopyEntryTo(Stream destination, long maximumSize = long.MaxValue)
+		{
 			if (!hasCurrentEntry) throw new InvalidOperationException("No current entry");
-			using (SHA256 sha = SHA256.Create())
+			if (currentEntrySize < 0 || currentEntrySize > maximumSize)
+				throw new InvalidDataException("TAR member is too large: " + currentEntrySize + " bytes.");
+			using (SHA256 sha = FastSha256.Create())
 			{
-				byte[] buffer = new byte[64 * 1024];
 				long remaining = currentEntrySize;
 				while (remaining > 0)
 				{
-					int requested = (int)Math.Min(buffer.Length, remaining);
-					int read = stream.Read(buffer, 0, requested);
+					CheckCancelled();
+					int requested = (int)Math.Min(ioBuffer.Length, remaining);
+					int read = stream.Read(ioBuffer, 0, requested);
 					if (read <= 0) throw new EndOfStreamException();
-					sha.TransformBlock(buffer, 0, read, buffer, 0);
+					destination?.Write(ioBuffer, 0, read);
+					sha.TransformBlock(ioBuffer, 0, read, null, 0);
 					remaining -= read;
 				}
 				sha.TransformFinalBlock(Array.Empty<byte>(), 0, 0);
@@ -130,15 +152,16 @@ namespace YanK
 		{
 			if (stream.CanSeek)
 			{
+				if (count > stream.Length - stream.Position) throw new EndOfStreamException();
 				stream.Seek(count, SeekOrigin.Current);
 				return;
 			}
-			byte[] buf = new byte[Math.Min(4096, count)];
 			long remaining = count;
 			while (remaining > 0)
 			{
-				int toRead = (int)Math.Min(buf.Length, remaining);
-				int n = stream.Read(buf, 0, toRead);
+				CheckCancelled();
+				int toRead = (int)Math.Min(ioBuffer.Length, remaining);
+				int n = stream.Read(ioBuffer, 0, toRead);
 				if (n <= 0) throw new EndOfStreamException();
 				remaining -= n;
 			}
@@ -171,7 +194,8 @@ namespace YanK
 					char c = s[i];
 					if (c < '0' || c > '7')
 						throw new InvalidDataException("Invalid octal value in TAR header.");
-					checked { value = (value << 3) + (c - '0'); }
+					// A shift is never overflow-checked, so multiply.
+					checked { value = value * 8 + (c - '0'); }
 				}
 			}
 			catch (OverflowException ex)
